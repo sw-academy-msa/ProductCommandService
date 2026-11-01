@@ -1,0 +1,8 @@
+package com.msa.product.domain.inquiry.query.dto.response;
+
+import com.msa.product.domain.inquiry.command.dto.response.InquiryResponse;
+import java.util.List;
+
+/** 판매자의 답변 업무용 문의함 응답이며 구매자 공개 조회 모델이 아닙니다. */
+public record InquiryInboxResponse(
+        List<InquiryResponse> items, int page, int size, long totalElements, int totalPages) {}
