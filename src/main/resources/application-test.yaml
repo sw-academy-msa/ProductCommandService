@@ -1,0 +1,16 @@
+# 보안 단위·MVC 테스트는 Account, Eureka, AWS, DB 없이 실행합니다.
+eureka:
+  client:
+    enabled: false
+spring:
+  config:
+    # 테스트는 개발자의 .env를 읽지 않도록 공통 import를 대체합니다.
+    import: optional:classpath:/test-overrides.properties
+  jpa:
+    hibernate:
+      ddl-auto: none
+product:
+  auth:
+    issuer: https://account.test
+    audience: stockdrop-api
+    jwk-set-uri: http://localhost:1/.well-known/jwks.json

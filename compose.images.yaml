@@ -1,0 +1,20 @@
+# Account 저장소의 S3Mock 버전을 따르되 버킷·포트·영속 볼륨을 분리합니다. 운영 S3 배포 파일이 아닙니다.
+name: stockdrop-product-images
+services:
+  s3mock:
+    image: adobe/s3mock:5.2.3
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: stockdrop-product-images
+    ports:
+      - "127.0.0.1:9092:9090"
+    volumes:
+      - product-s3-data:/s3mockroot
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/favicon.ico"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  product-s3-data:
