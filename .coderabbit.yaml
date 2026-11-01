@@ -1,0 +1,139 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# AccountService의 검토 설정을 Product Command의 책임·데이터 소유권에 맞게 적용합니다.
+language: ko-KR
+tone_instructions: "한국어로 간결하게 설명하세요. 실제 버그와 보안·데이터 일관성 문제를 우선하고, 발생 조건과 수정 이유를 구체적으로 제시하세요. 취향에 따른 구조 변경과 동일 지적의 반복은 피하세요."
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  poem: false
+
+  # main/develop 대상 PR을 자동 검토하며 Draft는 제외합니다.
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - "^main$"
+      - "^develop$"
+
+  # 소스·설정·CI를 검토하고 생성 파일과 바이너리만 제외합니다.
+  path_filters:
+    - "!**/build/**"
+    - "!**/.gradle/**"
+    - "!**/.idea/**"
+    - "!**/out/**"
+    - "!**/bin/**"
+    - "!**/*.class"
+    - "!gradle/wrapper/*.jar"
+
+  # 로컬 AGENTS.md에 의존하지 않고 저장소의 주요 검토 기준을 공유합니다.
+  path_instructions:
+    - path: "src/main/java/com/msa/product/**"
+      instructions: |
+        Java 21과 Spring Boot 4 기반 STOCKDROP Product Command입니다.
+        Product와 Order는 각각 Command/Query 별도 앱이며 Account·Payment·AI에는 별도 CQRS 앱을 추가하지 않습니다.
+        Product Command는 별도 Command PostgreSQL의 product_command DB/product 스키마를 소유합니다.
+        복제본은 같은 원본 DB에 연결하며 다른 서비스 테이블 직접 접근·SQL JOIN·공유 DB 트랜잭션을 사용하지 않습니다.
+        공개 목록·상세·검색은 별도 Product Query 책임입니다. 판매자 편집·심사·내부 상태 조회는 Command에 둘 수 있습니다.
+        서비스 인터페이스와 service/impl 구현체, DTO request/response, 책임별 global/config 구조를 유지하세요.
+        한국어 주석과 4칸 들여쓰기, 여러 줄 메서드·제어문을 유지하고 설계 제약과 주석의 일치를 확인하세요.
+        역할·최신 판매자 자격·본인 소유권·입력 검증을 확인하세요. 클라이언트 sellerId나 사용자 헤더를 신뢰하지 않습니다.
+        Kafka·Outbox·AI·Order/Payment 실제 연동은 후속 단계입니다. 미구현 자체를 현재 범위의 결함으로 판단하지 마세요.
+        후속 기능이 동작한다고 주장하거나 데이터 소유권을 우회하는 변경은 지적하세요.
+
+    - path: "src/main/java/com/msa/product/domain/product/**"
+      instructions: |
+        상품 등록은 초안·심사 요청·운영자 승인/반려 흐름이며 Account의 판매자 입점 심사와 구분합니다.
+        단계별 PUT은 해당 단계만 교체하고 다른 단계와 이미지 연결을 유지해야 합니다.
+        소유권·expectedVersion·상태 전이와 옵션/상세 정보/FAQ 저장 원자성을 확인하세요.
+        옵션명·선택지·조합 구조와 기존 옵션 ID 보존을 확인하고 색상·사이즈로 고정하지 않습니다.
+        승인 전 신규 확보는 불가하며 승인 후 핵심 정보 변경도 현재 차단합니다.
+        서버 시각·명확한 타임존으로 판매 시작과 3시간 종료를 판단합니다.
+        최초 수량은 재고 확보·확정·해제로 변경하지 않습니다. 수수료 계산과 정산 이력은 Payment 책임입니다.
+        Account의 기존 판매자 API로 자격과 주소를 확인하고 외부 호출은 상품 DB 트랜잭션 밖에서 수행합니다.
+        출고/반품 주소는 스냅샷이며 다른 서비스 DB를 직접 읽거나 승인 상품의 주소를 몰래 갱신하지 않습니다.
+        FAQ는 판매자가 확인한 답변만 저장하며 AI 참조 ID만으로 사실 검증 완료를 주장하지 않습니다.
+        미확정 카테고리·수정/재오픈/추가 입고·옵션 추가 가격 정책을 임의로 확정하도록 요구하지 마세요.
+
+    - path: "src/main/java/com/msa/product/domain/stock/**"
+      instructions: |
+        재고 원본은 PostgreSQL입니다. Redis와 Query 표시 재고를 구매 가능 여부의 근거로 사용하지 않습니다.
+        상품 잠금을 먼저 획득하는 순서와 복수 옵션 확보의 전체 성공/전체 롤백을 확인하세요.
+        DB 잠금은 짧은 트랜잭션 안에서만 유지하며 확보 시간 5분 동안 잠그지 않습니다.
+        초과 확보·동일 계정/상품 활성 확보 중복·재요청 만료 연장·이중 확정/복구를 확인하세요.
+        주문 ID의 멱등 처리와 같은 키의 다른 요청 거부, 결제 시도 ID 일치를 확인하세요.
+        미결제 HELD는 만료 해제하지만 결제 진행/결과 불명 상태를 시간 경과만으로 반환하지 않습니다.
+        실제 승인 시각과 만료·확정 경합을 구분하고 기한 후 결제는 Order가 보상을 확인한 뒤 해제합니다.
+        Order Command가 Saga를 소유합니다. Product에 토스 호출·주문/결제 전체 책임을 넣지 마세요.
+        내부 HTTP는 전용 scope와 지정된 Order subject를 요구하고 미설정이면 차단합니다.
+        실제 서비스 토큰 발급 계약이 구현되었다고 가정하지 마세요.
+        상품 단위 잠금은 초기 정확성 우선 설계입니다. 측정 없이 대체 아키텍처를 필수 수정으로 요구하지 마세요.
+
+    - path: "src/main/java/com/msa/product/domain/image/**"
+      instructions: |
+        브라우저는 제한된 S3 업로드 권한으로 직접 업로드하고 서버가 실제 객체를 검증한 뒤 연결합니다.
+        상품/판매자 소유권, 객체 키, 만료, 크기·형식·파일 서명과 ETag 조건을 확인하세요.
+        업로드 URL 재사용으로 연결된 최종 객체를 덮어쓸 수 없어야 합니다.
+        대표 이미지·순서·개수와 승인 후 편집 차단을 확인하세요.
+        DB와 S3를 원자적 트랜잭션으로 가정하지 않습니다. 실패 후 고아 객체와 재시도 정리를 확인하세요.
+        정리 작업이 연결된 최종 이미지를 삭제하거나 재고 만료 스케줄러를 막지 않아야 합니다.
+        파일 서명 검사나 S3Mock 테스트를 악성코드 검사·AWS IAM/CORS 검증 완료로 표현하지 않습니다.
+        임시 권한 URL·주소·토큰을 로그에 출력하지 마세요.
+
+    - path: "src/main/java/com/msa/product/domain/inquiry/**"
+      instructions: |
+        상품 문의만 소유하며 주문 취소·반품·배송 문의와 구분합니다.
+        구매자 ID는 JWT에서 결정하고 공개 전 상품에 문의를 만들지 않습니다.
+        판매자 본인 문의함과 답변 소유권·버전 충돌을 확인하세요.
+        답변과 선택한 FAQ 반영은 같은 로컬 트랜잭션이며 판매자 확인 없이 FAQ를 공개하지 않습니다.
+        같은 문의의 FAQ 중복 생성과 타인 문의/FAQ 노출을 확인하세요.
+        구매자용 문의/FAQ 조회는 별도 Query 책임이며 Command에 공개 조회 모델을 추가하지 마세요.
+
+    - path: "src/main/java/com/msa/product/global/config/**"
+      instructions: |
+        Account가 발급한 RS256 JWT의 서명·issuer·audience·만료·token_use·UUID subject·역할을 검증합니다.
+        개인키·JWT 발급·Refresh Token·쿠키 인증은 Product 책임이 아닙니다.
+        Gateway 검증만 믿거나 API 요청마다 JWT 서명 검증을 Account에 위임하지 않습니다.
+        판매자 자격 확인 HTTP와 JWKS 공개키 조회를 구분하세요.
+        운영의 localhost 고정·실제 비밀값 하드코딩·내부 API의 외부 공개를 확인하세요.
+        운영 S3는 IAM 역할, 로컬은 명시적 S3Mock과 더미 자격증명을 사용합니다.
+        로컬·테스트 실행에 실제 AWS 자격증명·Account 개인키·실제 결제를 요구하지 마세요.
+
+    - path: "src/test/**"
+      instructions: |
+        테스트 패키지는 대상 코드 구조를 따르고 PostgreSQL과 S3Mock은 격리된 Docker 컨테이너를 사용합니다.
+        Account HTTP fixture와 실제 Account/Gateway 통합 검증을 구분하세요.
+        역할·소유권·단계별 보존·옵션 원자성·주소 스냅샷·FAQ 확인·재고 중복/경합을 우선 검토하세요.
+        시간/순서 의존, 불완전한 정리, 기존 개발 DB나 볼륨 손상 가능성을 확인하세요.
+        단순 getter나 구현을 그대로 반복하는 테스트를 일괄적으로 요구하지 마세요.
+        실제 실행하지 않은 부하·AWS·Order/Payment·Kafka/Query 검증을 통과했다고 표현하지 않습니다.
+
+    - path: "src/main/resources/application*.yaml"
+      instructions: |
+        개발 update와 테스트 create-drop은 합의된 정책이고 운영은 validate입니다.
+        개발 변경마다 Flyway를 필수 요구하지 말고 운영 DDL 검토·버전 관리·마이그레이션과 구분하세요.
+        비밀값과 주소는 환경에서 주입하고 로컬 더미 자격증명을 실제 AWS 키로 오인하지 마세요.
+
+    - path: "compose*.yaml"
+      instructions: |
+        로컬 Command PostgreSQL·S3Mock 구성이며 운영 배포 완료를 의미하지 않습니다.
+        일반 Account DB와 Command DB의 분리, 영속 볼륨, 포트 바인딩과 healthcheck 도구를 확인하세요.
+        데이터 볼륨 삭제·복제본마다 별도 원본 DB 생성·구매 앱 EC2 안에 DB 설치를 제안하지 마세요.
+        운영 Command DB는 별도 EC2의 단일 PostgreSQL이고 고가용성을 보장하지 않습니다.
+        로컬 127.0.0.1 바인딩을 운영에 그대로 적용하지 않으며 S3Mock을 실제 IAM 검증으로 간주하지 않습니다.
+
+    - path: "Dockerfile"
+      instructions: |
+        운영 t4g EC2의 linux/arm64 호환성과 실행 사용자·JVM 메모리를 확인하세요.
+        .env·.secrets·키·로그가 이미지에 포함되지 않아야 합니다.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Java 21·Gradle Wrapper·Docker 기반 검증과 최소 권한을 확인하세요.
+        PR 검증에 AWS 자격증명·실제 결제·운영 데이터가 필요하지 않아야 합니다.
+
+chat:
+  auto_reply: true
