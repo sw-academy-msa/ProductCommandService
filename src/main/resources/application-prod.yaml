@@ -1,0 +1,33 @@
+# 운영은 필수 접속 정보를 주입하며 DDL을 애플리케이션이 자동 변경하지 않습니다.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:30000}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+product:
+  seller-account:
+    # 다른 EC2의 Account 내부 주소를 반드시 주입하며 localhost 기본값을 운영에 사용하지 않습니다.
+    base-url: ${ACCOUNT_INTERNAL_BASE_URL}
+  images:
+    # 운영은 EC2 IAM 역할과 실제 S3를 사용합니다.
+    local: false
+    endpoint: ""
+  auth:
+    issuer: ${JWT_ISSUER}
+    jwk-set-uri: ${ACCOUNT_JWKS_URI}
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE}
+  instance:
+    hostname: ${SERVICE_HOSTNAME}
+    instance-id: ${spring.application.name}:${SERVICE_INSTANCE_ID}
+    non-secure-port: ${SERVICE_PORT}

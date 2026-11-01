@@ -1,0 +1,10 @@
+# 로컬 비밀값과 다른 빌드의 산출물을 빌드 컨텍스트에서 제외합니다.
+.git
+.gradle
+build
+.env
+.env.*
+.keys
+.secrets
+logs
+docs

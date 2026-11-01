@@ -1,0 +1,21 @@
+# 일반 DB(5433)와 분리된 Command PostgreSQL에 Product 전용 계정으로 접속합니다.
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/product_command}
+    username: ${DB_USERNAME:product}
+    # 생성 스크립트가 .env에 저장한 비밀번호를 사용합니다. 공통 고정 비밀번호로 대체하지 않습니다.
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      # 운영 마이그레이션을 대신하지 않는 개발 전용 정책입니다.
+      ddl-auto: update
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+logging:
+  level:
+    com.msa.product: INFO

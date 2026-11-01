@@ -1,0 +1,78 @@
+# 공통 설정은 Product 소유 스키마와 공개키 검증 계약만 정의합니다.
+spring:
+  config:
+    import: optional:file:./.env[.properties]
+  application:
+    name: product-command-service
+  profiles:
+    default: local
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  servlet:
+    multipart:
+      # 파일은 권한이 제한된 S3 직접 업로드만 사용하며 MVC multipart 수신은 열지 않습니다.
+      enabled: false
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: product
+        jdbc:
+          time_zone: UTC
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+  # 외부 전달 헤더를 인증 사용자나 소유권의 근거로 사용하지 않습니다.
+  forward-headers-strategy: none
+product:
+  stock:
+    # 서비스 토큰 발급·주체 계약은 Order 연동 때 확정합니다. 미설정 시 내부 HTTP API는 차단합니다.
+    order-subject: ${ORDER_SERVICE_SUBJECT:}
+  seller-account:
+    base-url: ${ACCOUNT_INTERNAL_BASE_URL:http://localhost:8080}
+  policy:
+    # 최종 카테고리 목록은 별도 확정합니다. 비어 있으면 심사 제출이 차단됩니다.
+    categories: ${PRODUCT_CATEGORIES:}
+  images:
+    enabled: ${PRODUCT_IMAGES_ENABLED:false}
+    bucket: ${PRODUCT_IMAGES_BUCKET:}
+    region: ${PRODUCT_IMAGES_REGION:ap-northeast-2}
+    endpoint: ${PRODUCT_IMAGES_ENDPOINT:}
+    local: ${PRODUCT_IMAGES_LOCAL:false}
+    # 사용자 위임에 따른 이미지 형식과 보수적인 기술 상한이며 운영 설정으로 조정 가능합니다.
+    allowed-types: image/jpeg,image/png,image/webp
+    max-bytes: ${PRODUCT_IMAGES_MAX_BYTES:10485760}
+  auth:
+    issuer: ${JWT_ISSUER:http://localhost:8080}
+    audience: ${JWT_AUDIENCE:stockdrop-api}
+    jwk-set-uri: ${ACCOUNT_JWKS_URI:http://localhost:8080/.well-known/jwks.json}
+eureka:
+  client:
+    # 구매 Gateway가 복제본을 탐색할 수 있도록 기본 등록을 활성화합니다.
+    enabled: ${EUREKA_CLIENT_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://localhost:8761/eureka/}
+    healthcheck:
+      enabled: true
+  instance:
+    hostname: ${SERVICE_HOSTNAME:localhost}
+    prefer-ip-address: false
+    instance-id: ${spring.application.name}:${SERVICE_INSTANCE_ID:${random.uuid}}
+    non-secure-port: ${SERVICE_PORT:${server.port}}
+    health-check-url-path: /actuator/health
+    status-page-url-path: /actuator/health
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
