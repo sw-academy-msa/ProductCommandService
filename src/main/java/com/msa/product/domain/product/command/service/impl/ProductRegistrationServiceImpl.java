@@ -1,5 +1,6 @@
 package com.msa.product.domain.product.command.service.impl;
 
+import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.ProductError;
 import com.msa.product.domain.product.command.dto.request.RegistrationRequests.*;
 import com.msa.product.domain.product.command.dto.response.*;
@@ -7,8 +8,10 @@ import com.msa.product.domain.product.command.service.ProductRegistrationService
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.global.error.BusinessException;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.net.URI;
 import java.time.*;
 import java.util.*;
@@ -19,10 +22,13 @@ import java.util.*;
 public class ProductRegistrationServiceImpl implements ProductRegistrationService {
     private final ProductRepository products;
     private final Clock clock;
+    private final ProjectionOutboxService outbox;
 
-    public ProductRegistrationServiceImpl(ProductRepository products, Clock clock) {
+    public ProductRegistrationServiceImpl(
+            ProductRepository products, Clock clock, ProjectionOutboxService outbox) {
         this.products = products;
         this.clock = clock;
+        this.outbox = outbox;
     }
 
     public ProductResponse basic(UUID seller, UUID id, Basic r) {
@@ -250,6 +256,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
         p.changeId = UUID.randomUUID();
         p.updatedAt = clock.instant();
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 

@@ -1,5 +1,7 @@
 package com.msa.product.domain.stock.command.service.impl;
 
+import static org.assertj.core.api.Assertions.*;
+
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.domain.stock.command.dto.request.*;
@@ -9,38 +11,61 @@ import com.msa.product.domain.stock.query.service.StockStatusQueryService;
 import com.msa.product.domain.stock.repository.*;
 import com.msa.product.global.config.database.ProductDatabaseTestSupport;
 import com.msa.product.global.error.BusinessException;
+
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
+
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
-import static org.assertj.core.api.Assertions.*;
 
 /** 실제 PostgreSQL의 여러 커넥션으로 원자성·초과 확보·멱등·만료 경합을 검증합니다. */
 @SpringBootTest
 @ActiveProfiles("test")
 @Import(ProductDatabaseTestSupport.Time.class)
 class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
-    @Autowired
-    StockCommandService service;
-    @Autowired
-    StockStatusQueryService queries;
-    @Autowired
-    ProductRepository products;
-    @Autowired
-    StockReservationRepository reservations;
-    @Autowired
-    ActiveStockReservationRepository active;
-    @Autowired
-    TransactionTemplate tx;
-    @Autowired
-    MutableClock clock;
+    @Autowired StockCommandService service;
+    @Autowired StockStatusQueryService queries;
+    @Autowired ProductRepository products;
+    @Autowired StockReservationRepository reservations;
+    @Autowired ActiveStockReservationRepository active;
+    @Autowired TransactionTemplate tx;
+    @Autowired MutableClock clock;
     UUID product, optionA, optionB;
     Instant start = Instant.parse("2030-01-01T00:00:00Z");
+
+    @Test
+    void reservationKeepsTrustedOrderSnapshotAcrossRetries() throws Exception {
+        tx.executeWithoutResult(
+                s -> {
+                    var p = products.lock(product).orElseThrow();
+                    p.dispatchBusinessDays = 3;
+                    p.brandOrStore = "합성 판매처";
+                });
+        var input = request(UUID.randomUUID(), UUID.randomUUID(), 1, 1);
+        var first = service.reserve(input);
+        assertThat(first.sellerId()).isNotNull();
+        assertThat(first.productName()).isEqualTo("테스트 상품");
+        assertThat(first.dispatchBusinessDays()).isEqualTo(3);
+        assertThat(first.optionLabels()).containsKeys(optionA, optionB);
+        tx.executeWithoutResult(
+                s -> {
+                    var p = products.lock(product).orElseThrow();
+                    p.name = "원본이 나중에 바뀌어도 확보 당시 정보 유지";
+                    p.dispatchBusinessDays = 5;
+                });
+        var repeated = service.reserve(input);
+        assertThat(repeated.productName()).isEqualTo(first.productName());
+        assertThat(repeated.dispatchBusinessDays()).isEqualTo(first.dispatchBusinessDays());
+        var json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
+        var path = java.nio.file.Path.of("build/generated/order-stock-reply.json");
+        java.nio.file.Files.createDirectories(path.getParent());
+        java.nio.file.Files.writeString(path, json.writeValueAsString(repeated));
+    }
 
     @BeforeEach
     void setup() {

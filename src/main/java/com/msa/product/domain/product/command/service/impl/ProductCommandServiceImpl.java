@@ -1,17 +1,20 @@
 package com.msa.product.domain.product.command.service.impl;
 
+import com.msa.product.domain.image.repository.ProductImageRepository;
+import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.ProductError;
 import com.msa.product.domain.product.command.dto.request.*;
 import com.msa.product.domain.product.command.dto.response.ProductResponse;
 import com.msa.product.domain.product.command.service.ProductCommandService;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.global.config.product.ProductPolicyProperties;
 import com.msa.product.global.error.BusinessException;
+
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.net.URI;
 import java.time.*;
 import java.util.*;
@@ -25,16 +28,19 @@ public class ProductCommandServiceImpl implements ProductCommandService {
     private final ProductImageRepository images;
     private final ProductPolicyProperties policy;
     private final Clock clock;
+    private final ProjectionOutboxService outbox;
 
     public ProductCommandServiceImpl(
             ProductRepository products,
             ProductImageRepository images,
             ProductPolicyProperties policy,
-            Clock clock) {
+            Clock clock,
+            ProjectionOutboxService outbox) {
         this.products = products;
         this.images = images;
         this.policy = policy;
         this.clock = clock;
+        this.outbox = outbox;
     }
 
     public ProductResponse create(UUID seller) {
@@ -94,6 +100,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
                 .forEach(o -> p.options.add(new ProductOption(p, o.label().trim(), o.quantity())));
         p.status = Product.Status.DRAFT;
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 
@@ -132,6 +139,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.reviewerId = null;
         p.reviewedAt = null;
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 
@@ -153,6 +161,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.reviewedAt = clock.instant();
         p.updatedAt = clock.instant();
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 

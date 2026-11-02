@@ -1,6 +1,7 @@
 package com.msa.product.domain.stock.entity;
 
 import jakarta.persistence.*;
+
 import java.time.Instant;
 import java.util.*;
 
@@ -19,8 +20,7 @@ public class StockReservation {
         EXPIRED
     }
 
-    @Id
-    public UUID id;
+    @Id public UUID id;
 
     @Column(nullable = false, unique = true, updatable = false)
     public UUID orderId;
@@ -50,6 +50,26 @@ public class StockReservation {
 
     @Column(nullable = false, updatable = false)
     public long shippingFee;
+
+    // 주문 이력에 필요한 공개 정보를 확보 성공 시 고정합니다. Order가 Product 테이블을 읽지 않게 합니다.
+    public UUID sellerId;
+
+    @Column(length = 200)
+    public String productName;
+
+    @Column(length = 200)
+    public String brandOrStore;
+
+    public Integer dispatchBusinessDays;
+
+    @ElementCollection
+    @CollectionTable(
+            name = "stock_reservation_option_labels",
+            schema = "product",
+            joinColumns = @JoinColumn(name = "reservation_id"))
+    @MapKeyColumn(name = "option_id")
+    @Column(name = "option_label", length = 500)
+    public Map<UUID, String> optionLabels = new HashMap<>();
 
     @ElementCollection
     @CollectionTable(

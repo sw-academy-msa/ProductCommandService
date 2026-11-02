@@ -1,6 +1,7 @@
 package com.msa.product.domain.stock.command.dto.response;
 
 import com.msa.product.domain.stock.entity.StockReservation;
+
 import java.time.Instant;
 import java.util.*;
 
@@ -15,7 +16,12 @@ public record StockReservationResponse(
         Instant serverTime,
         long unitPrice,
         long shippingFee,
-        Map<UUID, Integer> items) {
+        Map<UUID, Integer> items,
+        UUID sellerId,
+        String productName,
+        String brandOrStore,
+        Integer dispatchBusinessDays,
+        Map<UUID, String> optionLabels) {
     public static StockReservationResponse from(StockReservation r, Instant now) {
         return new StockReservationResponse(
                 r.id,
@@ -27,6 +33,11 @@ public record StockReservationResponse(
                 now,
                 r.unitPrice,
                 r.shippingFee,
-                Map.copyOf(r.items));
+                Map.copyOf(r.items),
+                r.sellerId,
+                r.productName,
+                r.brandOrStore,
+                r.dispatchBusinessDays,
+                Map.copyOf(r.optionLabels));
     }
 }

@@ -1,5 +1,8 @@
 package com.msa.product.domain.stock.command.service.impl;
 
+import static com.msa.product.domain.stock.entity.StockReservation.Status.*;
+
+import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.ProductError;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
@@ -9,11 +12,12 @@ import com.msa.product.domain.stock.command.service.StockCommandService;
 import com.msa.product.domain.stock.entity.*;
 import com.msa.product.domain.stock.repository.*;
 import com.msa.product.global.error.BusinessException;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.*;
 import java.util.*;
-import static com.msa.product.domain.stock.entity.StockReservation.Status.*;
 
 /** 상품 행을 공통 잠금으로 사용해 복수 옵션·계정 상한·만료 경합을 보호합니다. JVM 잠금은 사용하지 않습니다. */
 @Service
@@ -23,16 +27,19 @@ public class StockCommandServiceImpl implements StockCommandService {
     private final StockReservationRepository reservations;
     private final ActiveStockReservationRepository active;
     private final Clock clock;
+    private final ProjectionOutboxService outbox;
 
     public StockCommandServiceImpl(
             ProductRepository products,
             StockReservationRepository reservations,
             ActiveStockReservationRepository active,
-            Clock clock) {
+            Clock clock,
+            ProjectionOutboxService outbox) {
         this.products = products;
         this.reservations = reservations;
         this.active = active;
         this.clock = clock;
+        this.outbox = outbox;
     }
 
     /** 단일 상품 잠금 후 모든 옵션을 검증·반영합니다. DB 잠금을 5분 유지하지 않습니다. */
@@ -97,8 +104,14 @@ public class StockCommandServiceImpl implements StockCommandService {
                                 now,
                                 p.price,
                                 p.shippingFee));
+        r.sellerId = p.sellerId;
+        r.productName = p.name;
+        r.brandOrStore = p.brandOrStore;
+        r.dispatchBusinessDays = p.dispatchBusinessDays;
+        items.keySet().forEach(optionId -> r.optionLabels.put(optionId, option(p, optionId).label));
         active.save(new ActiveStockReservation(r));
         reservations.flush();
+        outbox.productChanged(p);
         return response(r);
     }
 
@@ -151,6 +164,7 @@ public class StockCommandServiceImpl implements StockCommandService {
                     o.confirmedQuantity += quantity;
                 });
         finish(r, CONFIRMED);
+        outbox.productChanged(p);
         return response(r);
     }
 
@@ -170,6 +184,7 @@ public class StockCommandServiceImpl implements StockCommandService {
         }
         releaseQuantities(p, r);
         finish(r, RELEASED);
+        outbox.productChanged(p);
         return response(r);
     }
 
@@ -182,6 +197,7 @@ public class StockCommandServiceImpl implements StockCommandService {
         if (r.status == HELD && !clock.instant().isBefore(r.expiresAt)) {
             releaseQuantities(p, r);
             finish(r, EXPIRED);
+            outbox.productChanged(p);
         }
     }
 

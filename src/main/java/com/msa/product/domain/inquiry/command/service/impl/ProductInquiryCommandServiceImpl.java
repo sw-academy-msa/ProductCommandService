@@ -5,12 +5,15 @@ import com.msa.product.domain.inquiry.command.dto.response.InquiryResponse;
 import com.msa.product.domain.inquiry.command.service.ProductInquiryCommandService;
 import com.msa.product.domain.inquiry.entity.ProductInquiry;
 import com.msa.product.domain.inquiry.repository.ProductInquiryRepository;
+import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.ProductError;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.global.error.BusinessException;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Clock;
 import java.util.UUID;
 
@@ -21,12 +24,17 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
     private final ProductRepository products;
     private final ProductInquiryRepository inquiries;
     private final Clock clock;
+    private final ProjectionOutboxService outbox;
 
     public ProductInquiryCommandServiceImpl(
-            ProductRepository products, ProductInquiryRepository inquiries, Clock clock) {
+            ProductRepository products,
+            ProductInquiryRepository inquiries,
+            Clock clock,
+            ProjectionOutboxService outbox) {
         this.products = products;
         this.inquiries = inquiries;
         this.clock = clock;
+        this.outbox = outbox;
     }
 
     public InquiryResponse create(UUID buyer, UUID product, Create request) {
@@ -38,10 +46,12 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
         if (p.status != Product.Status.APPROVED) {
             throw new BusinessException(ProductError.NOT_FOUND);
         }
-        return InquiryResponse.from(
+        var inquiry =
                 inquiries.saveAndFlush(
                         new ProductInquiry(
-                                product, buyer, request.question().trim(), clock.instant())));
+                                product, buyer, request.question().trim(), clock.instant()));
+        outbox.inquiryChanged(inquiry);
+        return InquiryResponse.from(inquiry);
     }
 
     public InquiryResponse answer(UUID seller, UUID product, UUID id, Answer request) {
@@ -80,6 +90,10 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
             p.updatedAt = clock.instant();
         }
         inquiries.flush();
+        outbox.inquiryChanged(i);
+        if (request.publishToFaq()) {
+            outbox.productChanged(p);
+        }
         return InquiryResponse.from(i);
     }
 
