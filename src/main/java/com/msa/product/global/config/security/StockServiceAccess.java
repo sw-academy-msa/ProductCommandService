@@ -19,6 +19,8 @@ public class StockServiceAccess {
                 && auth != null
                 && auth.getPrincipal() instanceof Jwt jwt
                 && orderSubject.equals(jwt.getSubject())
+                && "service".equals(jwt.getClaimAsString("principal_type"))
+                && "order-command-service".equals(jwt.getClaimAsString("client_id"))
                 && auth.getAuthorities().stream()
                         .anyMatch(a -> a.getAuthority().equals("SCOPE_product.stock"));
     }
