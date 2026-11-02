@@ -6,8 +6,8 @@ Java 21 / Spring Boot 4.1.1 / Spring Cloud 2025.1.4 / Gradle 9.8.2.
 AccountService의 초기 구성과 스타일을 참고한 MVC 서비스입니다.
 상품 초안·옵션 저장, 심사 제출·승인·반려, 이미지 업로드 권한·검증·연결과 재고 확보·확정·해제 API를 구현했습니다.
 판매자 등록은 단계별 PUT으로 저장하며 브랜드·자유 상세 정보·구조화된 옵션·Account 배송 주소 스냅샷·판매자 확인 FAQ를 보존합니다.
-본인 상품 관리 목록·운영자 심사 목록·상품 문의·판매자 답변도 제공합니다. AI 생성과 Kafka 전파는 아직 연결하지 않았습니다.
-상품은 검사 후 승인하며 승인 전에는 재고를 확보할 수 없습니다. Product Query와 Kafka/Outbox는 아직 구현하지 않았습니다.
+본인 상품 관리 목록·운영자 심사 목록·상품 문의·판매자 답변도 제공합니다. AI 생성은 아직 연결하지 않았습니다.
+상품은 검사 후 승인하며 승인 전에는 재고를 확보할 수 없습니다. 승인·재고·FAQ·문의 변경은 Outbox와 Kafka를 통해 별도 Product Query에 전달할 수 있습니다. 두 앱의 발행/소비 활성화가 필요합니다.
 재고 확보는 5분이며, Order의 결제 진행 전이와 실제 승인 시각에 따라 확정·해제합니다.
 API 목록·설정·내부 인증 계약·검증 범위는 [상품·재고 API 안내](docs/product-command-api.md)를 확인합니다.
 [상품 등록 7단계 프런트 연동 안내](docs/product-registration.md)에 단계별 요청과 기존 전체 PUT 전환 방법을 정리했습니다.
@@ -44,6 +44,11 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot'
 - 구매자 상품 문의는 PurchaseGateway가 `POST /api/v1/products/{id}/inquiries`만 라우팅합니다. 상품 GET 조회를 Command로 연결하지 않습니다.
 
 ## 문서
+
+- [Outbox 저장·Kafka 발행·Query 이벤트 계약과 로컬 실행](contracts/product-projection-v1.md)
+- [Order 내부 확보 응답 스냅샷 확장과 책임 경계](contracts/order-stock-snapshot.md)
+- 상품 승인·재고·FAQ·문의 변경은 업무와 같은 트랜잭션으로 Outbox에 저장합니다. Kafka 발행은 PRODUCT_OUTBOX_PUBLISHER_ENABLED=true로 별도 활성화합니다.
+- 개발 스키마는 ddl-auto=update로 반영합니다. 운영 스키마 관리 방식은 배포 준비 시 정하며 운영 validate 설정은 유지합니다.
 
 - [조사 결과·의존성과 패키지·모델 초안·미정 정책](docs/initial-design.md)
 - [Figma 기반 화면 요구사항·서비스 경계·구현 계획](docs/figma-product-command-plan.md)
