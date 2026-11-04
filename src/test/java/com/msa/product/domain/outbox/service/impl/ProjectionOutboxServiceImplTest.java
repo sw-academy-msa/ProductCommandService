@@ -44,6 +44,7 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
     @Autowired JdbcTemplate jdbc;
     @Autowired JsonMapper json;
     @Autowired MutableClock clock;
+    @Autowired jakarta.persistence.EntityManager em;
     UUID productId;
     UUID optionId;
 
@@ -157,8 +158,8 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
         var inquiryBodies =
                 jdbc.queryForList(
                         "select payload from product.outbox_events where topic ="
-                            + " 'stockdrop.product.inquiries.v1' order by"
-                            + " (payload::jsonb->>'aggregateVersion')::bigint",
+                                + " 'stockdrop.product.inquiries.v1' order by"
+                                + " (payload::jsonb->>'aggregateVersion')::bigint",
                         String.class);
         assertThat(json.readTree(inquiryBodies.get(0)).path("aggregateVersion").asLong())
                 .isEqualTo(1);
@@ -167,8 +168,8 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
         var productBody =
                 jdbc.queryForObject(
                         "select payload from product.outbox_events where topic ="
-                            + " 'stockdrop.product.public.v1' order by"
-                            + " (payload::jsonb->>'aggregateVersion')::bigint desc limit 1",
+                                + " 'stockdrop.product.public.v1' order by"
+                                + " (payload::jsonb->>'aggregateVersion')::bigint desc limit 1",
                         String.class);
         assertThat(productBody).doesNotContain("buyerId", "answeredBy", "sourceInquiryId");
         assertThat(json.readTree(productBody).path("product").path("faqs").size()).isEqualTo(1);
@@ -208,6 +209,58 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
         assertThat(body.path("confirmedQuantity").asInt()).isZero();
     }
 
+    @Test
+    void repeatedVersionAdvanceKeepsManagedProductAndUsesFreshVersionInSameTransaction() {
+        commands.review(UUID.randomUUID(), productId, new ReviewProductRequest(0L, true, null));
+        tx.executeWithoutResult(
+                s -> {
+                    var p = products.lock(productId).orElseThrow();
+                    p.purchaseNotice = "원본 변경 보존";
+                    outbox.productChanged(p);
+                    assertThat(em.contains(p)).isTrue();
+                    p.shippingNotice = "같은 트랜잭션의 추가 변경";
+                    outbox.productChanged(p);
+                    assertThat(em.contains(p)).isTrue();
+                });
+        var saved = products.findById(productId).orElseThrow();
+        assertThat(saved.purchaseNotice).isEqualTo("원본 변경 보존");
+        assertThat(saved.shippingNotice).isEqualTo("같은 트랜잭션의 추가 변경");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select version from product.projection_sequences where id=?",
+                                Long.class,
+                                "product:" + productId))
+                .isEqualTo(3);
+        assertThat(json.readTree(latest()).path("aggregateVersion").asLong()).isEqualTo(3);
+    }
+
+    @Test
+    void repeatedVersionAdvancePreservesFirstSoldOutTime() {
+        commands.review(UUID.randomUUID(), productId, new ReviewProductRequest(0L, true, null));
+        clock.set(clock.instant().plusSeconds(11));
+        var reservation =
+                stock.reserve(
+                        new ReserveStockRequest(
+                                UUID.randomUUID(),
+                                productId,
+                                UUID.randomUUID(),
+                                List.of(new ReserveStockRequest.Item(optionId, 2))));
+        var attempt = UUID.randomUUID();
+        stock.beginPayment(reservation.id(), attempt);
+        stock.confirm(reservation.id(), attempt, clock.instant());
+        String soldOutAt = json.readTree(latest()).path("product").path("soldOutAt").asText();
+        clock.set(clock.instant().plusSeconds(100));
+        tx.executeWithoutResult(
+                s -> {
+                    var p = products.lock(productId).orElseThrow();
+                    outbox.productChanged(p);
+                    outbox.productChanged(p);
+                });
+        assertThat(json.readTree(latest()).path("product").path("soldOutAt").asText())
+                .isEqualTo(soldOutAt);
+        assertThat(json.readTree(latest()).path("aggregateVersion").asLong()).isEqualTo(5);
+    }
+
     private long count() {
         return jdbc.queryForObject("select count(*) from product.outbox_events", Long.class);
     }
@@ -215,7 +268,7 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
     private String latest() {
         return jdbc.queryForObject(
                 "select payload from product.outbox_events order by"
-                    + " (payload::jsonb->>'aggregateVersion')::bigint desc limit 1",
+                        + " (payload::jsonb->>'aggregateVersion')::bigint desc limit 1",
                 String.class);
     }
 }

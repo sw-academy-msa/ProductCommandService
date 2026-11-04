@@ -3,15 +3,15 @@ package com.msa.product.domain.stock.command.service.impl;
 import static com.msa.product.domain.stock.entity.StockReservation.Status.*;
 
 import com.msa.product.domain.outbox.service.ProjectionOutboxService;
-import com.msa.product.domain.product.ProductError;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.domain.stock.command.dto.request.*;
 import com.msa.product.domain.stock.command.dto.response.StockReservationResponse;
 import com.msa.product.domain.stock.command.service.StockCommandService;
 import com.msa.product.domain.stock.entity.*;
+import com.msa.product.domain.stock.exception.StockErrorCode;
+import com.msa.product.domain.stock.exception.StockException;
 import com.msa.product.domain.stock.repository.*;
-import com.msa.product.global.error.BusinessException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,14 +47,14 @@ public class StockCommandServiceImpl implements StockCommandService {
         Product p = lockProduct(request.productId());
         Map<UUID, Integer> items = new TreeMap<>();
         if (request.items() == null || request.items().isEmpty()) {
-            fail(ProductError.INVALID);
+            fail(StockErrorCode.INVALID);
         }
         for (var item : request.items()) {
             if (item == null
                     || item.optionId() == null
                     || item.quantity() <= 0
                     || items.putIfAbsent(item.optionId(), item.quantity()) != null) {
-                fail(ProductError.INVALID);
+                fail(StockErrorCode.INVALID);
             }
         }
         var prior = reservations.findByOrderId(request.orderId());
@@ -63,20 +63,20 @@ public class StockCommandServiceImpl implements StockCommandService {
             if (!r.productId.equals(p.id)
                     || !r.buyerId.equals(request.buyerId())
                     || !r.items.equals(items)) {
-                fail(ProductError.DUPLICATE);
+                fail(StockErrorCode.DUPLICATE);
             }
             expireHeld(p, r);
             return response(r);
         }
         Instant now = clock.instant();
         if (!p.isOnSale(now)) {
-            fail(ProductError.STATE);
+            fail(StockErrorCode.STATE);
         }
         var previous = reservations.findByProductIdAndBuyerId(p.id, request.buyerId());
         previous.forEach(r -> expireHeld(p, r));
         active.flush();
         if (active.existsByProductIdAndBuyerId(p.id, request.buyerId())) {
-            fail(ProductError.DUPLICATE);
+            fail(StockErrorCode.DUPLICATE);
         }
         long purchased =
                 previous.stream()
@@ -86,30 +86,31 @@ public class StockCommandServiceImpl implements StockCommandService {
                         .sum();
         long requested = items.values().stream().mapToLong(Integer::longValue).sum();
         if (requested + purchased > p.perAccountLimit) {
-            fail(ProductError.STOCK);
+            fail(StockErrorCode.STOCK);
         }
         for (var item : items.entrySet()) {
             if (option(p, item.getKey()).available() < item.getValue()) {
-                fail(ProductError.STOCK);
+                fail(StockErrorCode.STOCK);
             }
         }
         items.forEach((id, quantity) -> option(p, id).reservedQuantity += quantity);
         var r =
                 reservations.save(
-                        new StockReservation(
-                                request.orderId(),
-                                p.id,
-                                request.buyerId(),
-                                items,
-                                now,
-                                p.price,
-                                p.shippingFee));
+                        StockReservation.builder()
+                                .order(request.orderId())
+                                .product(p.id)
+                                .buyer(request.buyerId())
+                                .items(items)
+                                .now(now)
+                                .price(p.price)
+                                .shippingFee(p.shippingFee)
+                                .build());
         r.sellerId = p.sellerId;
         r.productName = p.name;
         r.brandOrStore = p.brandOrStore;
         r.dispatchBusinessDays = p.dispatchBusinessDays;
         items.keySet().forEach(optionId -> r.optionLabels.put(optionId, option(p, optionId).label));
-        active.save(new ActiveStockReservation(r));
+        active.save(ActiveStockReservation.builder().reservation(r).build());
         reservations.flush();
         outbox.productChanged(p);
         return response(r);
@@ -124,10 +125,10 @@ public class StockCommandServiceImpl implements StockCommandService {
             return response(r);
         }
         if (r.status != HELD) {
-            fail(ProductError.STATE);
+            fail(StockErrorCode.STATE);
         }
         if (!clock.instant().isBefore(r.expiresAt)) {
-            fail(ProductError.EXPIRED);
+            fail(StockErrorCode.EXPIRED);
         }
         r.status = PAYMENT_PROCESSING;
         r.paymentAttemptId = Objects.requireNonNull(attempt);
@@ -139,22 +140,22 @@ public class StockCommandServiceImpl implements StockCommandService {
         Product p = lockForReservation(id);
         StockReservation r = required(id);
         if (!Objects.equals(attempt, r.paymentAttemptId)) {
-            fail(ProductError.STATE);
+            fail(StockErrorCode.STATE);
         }
         if (r.status == CONFIRMED) {
             if (!Objects.equals(r.paymentApprovedAt, approvedAt)) {
-                fail(ProductError.DUPLICATE);
+                fail(StockErrorCode.DUPLICATE);
             }
             return response(r);
         }
         if (r.status != PAYMENT_PROCESSING) {
-            fail(ProductError.STATE);
+            fail(StockErrorCode.STATE);
         }
         // 승인 응답이 늦게 도착해도 기한 내 실제 승인이면 확정합니다. 기한 후 승인은 Order가 결제 보상을 먼저 수행합니다.
         if (approvedAt == null
                 || approvedAt.isBefore(r.createdAt)
                 || !approvedAt.isBefore(r.expiresAt)) {
-            fail(ProductError.EXPIRED);
+            fail(StockErrorCode.EXPIRED);
         }
         r.paymentApprovedAt = approvedAt;
         r.items.forEach(
@@ -175,12 +176,12 @@ public class StockCommandServiceImpl implements StockCommandService {
             return response(r);
         }
         if (r.status == CONFIRMED) {
-            fail(ProductError.STATE);
+            fail(StockErrorCode.STATE);
         }
         if (r.status == PAYMENT_PROCESSING
                 && (!request.paymentFailureConfirmed()
                         || !Objects.equals(request.paymentAttemptId(), r.paymentAttemptId))) {
-            fail(ProductError.STATE);
+            fail(StockErrorCode.STATE);
         }
         releaseQuantities(p, r);
         finish(r, RELEASED);
@@ -216,32 +217,32 @@ public class StockCommandServiceImpl implements StockCommandService {
         UUID productId =
                 reservations
                         .findProductId(id)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                        .orElseThrow(() -> new StockException(StockErrorCode.NOT_FOUND));
         return lockProduct(productId);
     }
 
     private Product lockProduct(UUID id) {
-        return products.lock(id).orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+        return products.lock(id).orElseThrow(() -> new StockException(StockErrorCode.NOT_FOUND));
     }
 
     private StockReservation required(UUID id) {
         return reservations
                 .findById(id)
-                .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                .orElseThrow(() -> new StockException(StockErrorCode.NOT_FOUND));
     }
 
     private ProductOption option(Product p, UUID id) {
         return p.options.stream()
                 .filter(o -> o.id.equals(id))
                 .findFirst()
-                .orElseThrow(() -> new BusinessException(ProductError.INVALID));
+                .orElseThrow(() -> new StockException(StockErrorCode.INVALID));
     }
 
     private StockReservationResponse response(StockReservation r) {
         return StockReservationResponse.from(r, clock.instant());
     }
 
-    private void fail(ProductError error) {
-        throw new BusinessException(error);
+    private void fail(StockErrorCode error) {
+        throw new StockException(error);
     }
 }

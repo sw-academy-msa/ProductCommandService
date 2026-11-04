@@ -1,12 +1,20 @@
 package com.msa.product.domain.product.command.controller;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import com.msa.product.domain.image.entity.ProductImage;
+import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.domain.product.command.dto.response.*;
 import com.msa.product.domain.product.command.service.*;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.domain.image.entity.ProductImage;
-import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.global.config.database.ProductDatabaseTestSupport;
+
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,15 +25,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
+
 import tools.jackson.databind.ObjectMapper;
+
 import java.time.*;
 import java.util.*;
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** 실제 PostgreSQL로 단계별 비파괴 저장·구조화 옵션·주소 스냅샷·FAQ·관리 목록을 검증합니다. */
 @SpringBootTest
@@ -33,25 +37,29 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @Import(ProductDatabaseTestSupport.Time.class)
 class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
-    @Autowired
-    MockMvc mvc;
-    @Autowired
-    ProductCommandService commands;
-    @Autowired
-    ProductRegistrationService registration;
-    @Autowired
-    ProductRepository products;
-    @Autowired
-    ProductImageRepository images;
-    @Autowired
-    ObjectMapper mapper;
-    @Autowired
-    TransactionTemplate tx;
-    @Autowired
-    MutableClock clock;
-    @MockitoBean
-    SellerEligibilityService account;
+    @Autowired MockMvc mvc;
+    @Autowired ProductCommandService commands;
+    @Autowired ProductRegistrationService registration;
+    @Autowired ProductRepository products;
+    @Autowired ProductImageRepository images;
+    @Autowired ObjectMapper mapper;
+    @Autowired TransactionTemplate tx;
+    @Autowired MutableClock clock;
+    @MockitoBean SellerEligibilityService account;
     UUID seller, product;
+
+    /** 등록 메타데이터는 원시 배열 대신 이름 있는 응답 DTO로 직렬화합니다. */
+    @Test
+    void registrationMetadataUsesResponseDto() throws Exception {
+        mvc.perform(
+                        get("/api/v1/seller/products/registration-metadata")
+                                .with(
+                                        jwt().jwt(j -> j.subject(seller.toString()))
+                                                .authorities(
+                                                        new SimpleGrantedAuthority("ROLE_SELLER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.categories").isArray());
+    }
 
     @BeforeEach
     void setup() {
@@ -89,20 +97,25 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
                                         .content(body))
                         .andExpect(status().isOk())
                         .andReturn();
-        return mapper.readValue(
-                result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8),
+        return mapper.treeToValue(
+                mapper.readTree(
+                                result.getResponse()
+                                        .getContentAsString(
+                                                java.nio.charset.StandardCharsets.UTF_8))
+                        .path("data"),
                 ProductResponse.class);
     }
 
     String basic() {
-        return "\"name\":\"새 노트\",\"description\":\"미판매 새 상품\",\"brandOrStore\":\"테스트 스토어\",\"category\":\"문구\",\"sourceUrl\":\"https://example.com/item\"";
+        return "\"name\":\"새 노트\",\"description\":\"미판매 새 상품\",\"brandOrStore\":\"테스트"
+                + " 스토어\",\"category\":\"문구\",\"sourceUrl\":\"https://example.com/item\"";
     }
 
     String options() {
         return """
-        "dimensions":[{"name":"규격","values":["A","B"]}],
-        "variants":[{"selections":{"규격":"A"},"initialQuantity":10},{"selections":{"규격":"B"},"initialQuantity":5}]
-        """;
+"dimensions":[{"name":"규격","values":["A","B"]}],
+"variants":[{"selections":{"규격":"A"},"initialQuantity":10},{"selections":{"규격":"B"},"initialQuantity":5}]
+""";
     }
 
     @Test
@@ -110,7 +123,8 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
         step("basic-info", basic());
         step(
                 "details",
-                "\"attributes\":[{\"name\":\"페이지\",\"value\":\"100쪽\"}],\"disposalReason\":\"남은 재고\"");
+                "\"attributes\":[{\"name\":\"페이지\",\"value\":\"100쪽\"}],\"disposalReason\":\"남은"
+                        + " 재고\"");
         var p = step("options", options());
         assertThat(p.name()).isEqualTo("새 노트");
         assertThat(p.attributes()).hasSize(1);
@@ -124,7 +138,8 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
         p =
                 step(
                         "faqs",
-                        "\"faqs\":[{\"question\":\"페이지 수는?\",\"answer\":\"100쪽입니다.\",\"confirmed\":true}]");
+                        "\"faqs\":[{\"question\":\"페이지"
+                                + " 수는?\",\"answer\":\"100쪽입니다.\",\"confirmed\":true}]");
         assertThat(p.faqs()).hasSize(1);
         assertThat(p.brandOrStore()).isEqualTo("테스트 스토어");
         tx.executeWithoutResult(
@@ -146,11 +161,11 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
                                 .contentType("application/json")
                                 .content("{\"expectedVersion\":" + version() + "}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("IN_REVIEW"));
+                .andExpect(jsonPath("$.data.status").value("IN_REVIEW"));
         mvc.perform(get("/api/v1/seller/products/" + product).with(seller(seller)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.optionDimensions[0].values[0]").value("A"))
-                .andExpect(jsonPath("$.faqs[0].answer").value("100쪽입니다."));
+                .andExpect(jsonPath("$.data.optionDimensions[0].values[0]").value("A"))
+                .andExpect(jsonPath("$.data.faqs[0].answer").value("100쪽입니다."));
     }
 
     @Test
@@ -182,7 +197,7 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
                 .andExpect(status().isBadRequest());
         assertThat(version()).isEqualTo(v);
         mvc.perform(get("/api/v1/seller/products/" + product).with(seller(seller)))
-                .andExpect(jsonPath("$.options[0].initialQuantity").value(7));
+                .andExpect(jsonPath("$.data.options[0].initialQuantity").value(7));
     }
 
     @Test
@@ -253,7 +268,8 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
         var p =
                 step(
                         "faqs",
-                        "\"faqs\":[{\"question\":\"질문\",\"answer\":\"확인한 답변\",\"confirmed\":true}]");
+                        "\"faqs\":[{\"question\":\"질문\",\"answer\":\"확인한"
+                                + " 답변\",\"confirmed\":true}]");
         var faqId = p.faqs().getFirst().id();
         mvc.perform(
                         put("/api/v1/seller/products/" + product + "/faqs/" + faqId)
@@ -262,16 +278,17 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
                                 .content(
                                         "{\"expectedVersion\":"
                                                 + version()
-                                                + ",\"faq\":{\"question\":\"질문\",\"answer\":\"수정한 답변\",\"confirmed\":true}}"))
+                                                + ",\"faq\":{\"question\":\"질문\",\"answer\":\"수정한"
+                                                + " 답변\",\"confirmed\":true}}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.faqs[0].id").value(faqId.toString()))
-                .andExpect(jsonPath("$.faqs[0].answer").value("수정한 답변"));
+                .andExpect(jsonPath("$.data.faqs[0].id").value(faqId.toString()))
+                .andExpect(jsonPath("$.data.faqs[0].answer").value("수정한 답변"));
         mvc.perform(
                         delete("/api/v1/seller/products/" + product + "/faqs/" + faqId)
                                 .param("expectedVersion", "" + version())
                                 .with(seller(seller)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.faqs.length()").value(0));
+                .andExpect(jsonPath("$.data.faqs.length()").value(0));
     }
 
     @Test
@@ -280,8 +297,8 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
         assertThat(p.addressesCapturedAt()).isEqualTo(clock.instant());
         long v = version();
         doThrow(
-                        new com.msa.product.global.error.BusinessException(
-                                com.msa.product.domain.product.ProductError.POLICY))
+                        new com.msa.product.domain.product.exception.ProductException(
+                                com.msa.product.domain.product.exception.ProductErrorCode.POLICY))
                 .when(account)
                 .shipping(anyString(), eq(seller));
         mvc.perform(
@@ -299,8 +316,8 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
         var other = commands.create(UUID.randomUUID());
         mvc.perform(get("/api/v1/seller/products").with(seller(seller)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items.length()").value(1))
-                .andExpect(jsonPath("$.items[0].id").value(product.toString()));
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].id").value(product.toString()));
         mvc.perform(get("/api/v1/seller/products").param("size", "101").with(seller(seller)))
                 .andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/admin/product-reviews").with(seller(seller)))
@@ -335,10 +352,12 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
                                 .content(
                                         "{\"expectedVersion\":"
                                                 + version()
-                                                + ",\"faq\":{\"question\":\"새 질문\",\"answer\":\"판매자가 확인한 답변\",\"confirmed\":true}}"))
+                                                + ",\"faq\":{\"question\":\"새"
+                                                + " 질문\",\"answer\":\"판매자가 확인한"
+                                                + " 답변\",\"confirmed\":true}}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("APPROVED"))
-                .andExpect(jsonPath("$.faqs.length()").value(1));
+                .andExpect(jsonPath("$.data.status").value("APPROVED"))
+                .andExpect(jsonPath("$.data.faqs.length()").value(1));
     }
 
     @Test
@@ -392,10 +411,10 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
                 step(
                         "options",
                         """
-                "dimensions":[{"name":"구성","values":["A / B","A"]},{"name":"규격","values":["C","B / C"]}],
-                "variants":[{"selections":{"구성":"A / B","규격":"C"},"initialQuantity":1},
-                            {"selections":{"구성":"A","규격":"B / C"},"initialQuantity":1}]
-                """);
+"dimensions":[{"name":"구성","values":["A / B","A"]},{"name":"규격","values":["C","B / C"]}],
+"variants":[{"selections":{"구성":"A / B","규격":"C"},"initialQuantity":1},
+            {"selections":{"구성":"A","규격":"B / C"},"initialQuantity":1}]
+""");
         assertThat(p.options()).hasSize(2);
         assertThat(p.options().stream().map(ProductResponse.Option::label).distinct().count())
                 .isEqualTo(2);

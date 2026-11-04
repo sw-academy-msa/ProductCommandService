@@ -7,6 +7,7 @@ import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.domain.stock.command.dto.request.*;
 import com.msa.product.domain.stock.command.dto.response.StockReservationResponse;
 import com.msa.product.domain.stock.command.service.StockCommandService;
+import com.msa.product.domain.stock.exception.StockException;
 import com.msa.product.domain.stock.query.service.StockStatusQueryService;
 import com.msa.product.domain.stock.repository.*;
 import com.msa.product.global.config.database.ProductDatabaseTestSupport;
@@ -121,7 +122,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
     void multipleOptionsRollbackWhenOneIsInsufficient() {
         assertThatThrownBy(
                         () -> service.reserve(request(UUID.randomUUID(), UUID.randomUUID(), 2, 2)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThat(available(optionA)).isEqualTo(5);
         assertThat(available(optionB)).isEqualTo(1);
         assertThat(reservations.count()).isZero();
@@ -137,7 +138,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         assertThat(again.id()).isEqualTo(first.id());
         assertThat(again.expiresAt()).isEqualTo(start.plusSeconds(300));
         assertThatThrownBy(() -> service.reserve(request(order, buyer, 2, 1)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThat(available(optionA)).isEqualTo(4);
     }
 
@@ -146,7 +147,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         UUID buyer = UUID.randomUUID();
         service.reserve(request(UUID.randomUUID(), buyer, 1, 0));
         assertThatThrownBy(() -> service.reserve(request(UUID.randomUUID(), buyer, 1, 0)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
     }
 
     @Test
@@ -171,12 +172,12 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         clock.set(start.plusSeconds(500));
         service.expire(r.id());
         assertThatThrownBy(() -> service.release(r.id(), new ReleaseStockRequest(attempt, false)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         service.confirm(r.id(), attempt, start.plusSeconds(250));
         service.confirm(r.id(), attempt, start.plusSeconds(250));
         assertThat(available(optionA)).isEqualTo(4);
         assertThatThrownBy(() -> service.release(r.id(), new ReleaseStockRequest(attempt, true)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
     }
 
     @Test
@@ -185,9 +186,9 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         service.beginPayment(r.id(), UUID.randomUUID());
         UUID other = UUID.randomUUID();
         assertThatThrownBy(() -> service.confirm(r.id(), other, start.plusSeconds(100)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThatThrownBy(() -> service.release(r.id(), new ReleaseStockRequest(other, true)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
     }
 
     @Test
@@ -197,7 +198,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         service.beginPayment(r.id(), attempt);
         clock.set(start.plusSeconds(400));
         assertThatThrownBy(() -> service.confirm(r.id(), attempt, start.plusSeconds(301)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThat(available(optionA)).isEqualTo(4);
         // Order가 Payment 취소 완료를 확인한 뒤에만 해제할 수 있습니다.
         service.release(r.id(), new ReleaseStockRequest(attempt, true));
@@ -210,11 +211,11 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         var r = reserve();
         clock.set(start.plusSeconds(300));
         assertThatThrownBy(() -> service.beginPayment(r.id(), UUID.randomUUID()))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         clock.set(start.minusNanos(1));
-        assertThatThrownBy(this::reserve).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(this::reserve).isInstanceOf(StockException.class);
         clock.set(start.plusSeconds(10800));
-        assertThatThrownBy(this::reserve).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(this::reserve).isInstanceOf(StockException.class);
     }
 
     @Test

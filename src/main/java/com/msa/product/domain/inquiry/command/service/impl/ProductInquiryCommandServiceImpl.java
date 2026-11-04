@@ -4,12 +4,12 @@ import com.msa.product.domain.inquiry.command.dto.request.InquiryRequests.*;
 import com.msa.product.domain.inquiry.command.dto.response.InquiryResponse;
 import com.msa.product.domain.inquiry.command.service.ProductInquiryCommandService;
 import com.msa.product.domain.inquiry.entity.ProductInquiry;
+import com.msa.product.domain.inquiry.exception.InquiryErrorCode;
+import com.msa.product.domain.inquiry.exception.InquiryException;
 import com.msa.product.domain.inquiry.repository.ProductInquiryRepository;
 import com.msa.product.domain.outbox.service.ProjectionOutboxService;
-import com.msa.product.domain.product.ProductError;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.global.error.BusinessException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,15 +41,19 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
         // 문의 생성은 상품/재고를 바꾸지 않으므로 구매 처리의 상품 쓰기 잠금을 점유하지 않습니다.
         var p =
                 products.findById(product)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                        .orElseThrow(() -> new InquiryException(InquiryErrorCode.NOT_FOUND));
         // 공개 전 초안·심사 중 상품에는 문의를 생성하지 않습니다. 판매 시작 전 승인 상품에는 문의할 수 있습니다.
         if (p.status != Product.Status.APPROVED) {
-            throw new BusinessException(ProductError.NOT_FOUND);
+            throw new InquiryException(InquiryErrorCode.NOT_FOUND);
         }
         var inquiry =
                 inquiries.saveAndFlush(
-                        new ProductInquiry(
-                                product, buyer, request.question().trim(), clock.instant()));
+                        ProductInquiry.builder()
+                                .product(product)
+                                .buyer(buyer)
+                                .question(request.question().trim())
+                                .now(clock.instant())
+                                .build());
         outbox.inquiryChanged(inquiry);
         return InquiryResponse.from(inquiry);
     }
@@ -60,12 +64,12 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
         var i =
                 inquiries
                         .findById(id)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                        .orElseThrow(() -> new InquiryException(InquiryErrorCode.NOT_FOUND));
         if (!i.productId.equals(product)) {
-            throw new BusinessException(ProductError.NOT_FOUND);
+            throw new InquiryException(InquiryErrorCode.NOT_FOUND);
         }
         if (i.version != request.expectedVersion() || p.status == Product.Status.IN_REVIEW) {
-            throw new BusinessException(ProductError.STATE);
+            throw new InquiryException(InquiryErrorCode.STATE);
         }
         i.answer = request.answer().trim();
         i.answeredBy = seller;
@@ -77,7 +81,15 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
                             .findFirst()
                             .orElse(null);
             if (faq == null) {
-                faq = new ProductFaq(p, i.question, i.answer, null, seller, clock.instant());
+                faq =
+                        ProductFaq.builder()
+                                .product(p)
+                                .question(i.question)
+                                .answer(i.answer)
+                                .suggestionId(null)
+                                .seller(seller)
+                                .now(clock.instant())
+                                .build();
                 faq.sourceInquiryId = id;
                 p.faqs.add(faq);
             } else {
@@ -98,6 +110,7 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
     }
 
     private Product product(UUID id) {
-        return products.lock(id).orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+        return products.lock(id)
+                .orElseThrow(() -> new InquiryException(InquiryErrorCode.NOT_FOUND));
     }
 }

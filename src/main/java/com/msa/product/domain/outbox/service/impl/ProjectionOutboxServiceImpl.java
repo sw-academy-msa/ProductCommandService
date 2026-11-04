@@ -3,12 +3,12 @@ package com.msa.product.domain.outbox.service.impl;
 import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.domain.inquiry.entity.ProductInquiry;
 import com.msa.product.domain.outbox.entity.OutboxEvent;
+import com.msa.product.domain.outbox.repository.ProjectionSequenceRepository;
 import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.entity.Product;
 
 import jakarta.persistence.EntityManager;
 
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.*;
 
@@ -22,19 +22,19 @@ import java.util.*;
 @Transactional(propagation = Propagation.MANDATORY)
 public class ProjectionOutboxServiceImpl implements ProjectionOutboxService {
     private final EntityManager em;
-    private final JdbcTemplate jdbc;
+    private final ProjectionSequenceRepository sequences;
     private final ProductImageRepository images;
     private final JsonMapper json;
     private final Clock clock;
 
     public ProjectionOutboxServiceImpl(
             EntityManager em,
-            JdbcTemplate jdbc,
+            ProjectionSequenceRepository sequences,
             ProductImageRepository images,
             JsonMapper json,
             Clock clock) {
         this.em = em;
-        this.jdbc = jdbc;
+        this.sequences = sequences;
         this.images = images;
         this.json = json;
         this.clock = clock;
@@ -45,21 +45,15 @@ public class ProjectionOutboxServiceImpl implements ProjectionOutboxService {
         if (p.status != Product.Status.APPROVED) {
             return;
         }
-        long version = next("product:" + p.id);
+        var sequence = sequences.advance("product:" + p.id);
+        long version = sequence.version;
         boolean soldOut =
                 p.options.stream().allMatch(o -> o.confirmedQuantity == o.initialQuantity);
-        jdbc.update(
-                "update product.projection_sequences set sold_out_at = case when ? then"
-                    + " coalesce(sold_out_at, ?) else null end where id = ?",
-                soldOut,
-                java.sql.Timestamp.from(clock.instant()),
-                "product:" + p.id);
-        Instant soldOutAt =
-                jdbc.queryForObject(
-                        "select sold_out_at from product.projection_sequences where id = ?",
-                        (rs, row) ->
-                                rs.getTimestamp(1) == null ? null : rs.getTimestamp(1).toInstant(),
-                        "product:" + p.id);
+        sequence.soldOutAt =
+                soldOut
+                        ? (sequence.soldOutAt == null ? clock.instant() : sequence.soldOutAt)
+                        : null;
+        Instant soldOutAt = sequence.soldOutAt;
         var body =
                 fields(
                         "status",
@@ -185,13 +179,7 @@ public class ProjectionOutboxServiceImpl implements ProjectionOutboxService {
     }
 
     private long next(String id) {
-        // INSERT 경합도 PostgreSQL이 직렬화하며 버전 증분은 업무 롤백 시 함께 취소됩니다.
-        return jdbc.queryForObject(
-                "insert into product.projection_sequences (id, version) values (?, 1) on conflict"
-                    + " (id) do update set version = product.projection_sequences.version + 1"
-                    + " returning version",
-                Long.class,
-                id);
+        return sequences.advance(id).version;
     }
 
     private void store(
@@ -222,7 +210,14 @@ public class ProjectionOutboxServiceImpl implements ProjectionOutboxService {
                         product,
                         "inquiry",
                         inquiry);
-        em.persist(new OutboxEvent(id, topic, key, json.writeValueAsString(event), now));
+        em.persist(
+                OutboxEvent.builder()
+                        .id(id)
+                        .topic(topic)
+                        .productId(key)
+                        .payload(json.writeValueAsString(event))
+                        .now(now)
+                        .build());
     }
 
     private Map<String, Object> fields(Object... values) {

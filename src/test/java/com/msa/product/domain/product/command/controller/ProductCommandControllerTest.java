@@ -71,8 +71,8 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     void createsSellerOwnedDraftFromJwtAndChecksAccount() throws Exception {
         mvc.perform(post("/api/v1/seller/products").with(seller(seller)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.sellerId").value(seller.toString()))
-                .andExpect(jsonPath("$.status").value("DRAFT"));
+                .andExpect(jsonPath("$.data.sellerId").value(seller.toString()))
+                .andExpect(jsonPath("$.data.status").value("DRAFT"));
         verify(eligibility).requireApproved(anyString());
     }
 
@@ -106,8 +106,8 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                 .contentType("application/json")
                                 .content(body(p.version())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.options.length()").value(2))
-                .andExpect(jsonPath("$.endsAt").value("2030-01-02T03:00:00Z"));
+                .andExpect(jsonPath("$.data.options.length()").value(2))
+                .andExpect(jsonPath("$.data.endsAt").value("2030-01-02T03:00:00Z"));
         var saved = products.findById(p.id()).orElseThrow();
         for (String invalid :
                 List.of(
@@ -190,7 +190,7 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                 .contentType("application/json")
                                 .content("{\"expectedVersion\":" + version + "}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("IN_REVIEW"));
+                .andExpect(jsonPath("$.data.status").value("IN_REVIEW"));
         version = products.findById(p.id()).orElseThrow().version;
         mvc.perform(
                         post("/api/v1/admin/product-reviews/" + p.id() + "/decisions")
@@ -207,7 +207,7 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                 .contentType("application/json")
                                 .content("{\"expectedVersion\":" + version + ",\"approved\":true}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("APPROVED"));
+                .andExpect(jsonPath("$.data.status").value("APPROVED"));
         mvc.perform(
                         put("/api/v1/seller/products/" + p.id())
                                 .with(seller(seller))
@@ -232,8 +232,8 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     @Test
     void accountUnavailabilityFailsClosed() throws Exception {
         doThrow(
-                        new com.msa.product.global.error.BusinessException(
-                                com.msa.product.domain.product.ProductError.POLICY))
+                        new com.msa.product.domain.product.exception.ProductException(
+                                com.msa.product.domain.product.exception.ProductErrorCode.POLICY))
                 .when(eligibility)
                 .requireApproved(anyString());
         mvc.perform(post("/api/v1/seller/products").with(seller(seller)))

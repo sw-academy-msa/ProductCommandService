@@ -3,12 +3,16 @@ package com.msa.product.domain.image.command.controller;
 import com.msa.product.domain.image.command.dto.request.*;
 import com.msa.product.domain.image.command.dto.response.ImageResponse;
 import com.msa.product.domain.image.command.service.ProductImageService;
+import com.msa.product.global.response.ApiResponse;
+import com.msa.product.global.response.SuccessCode;
+
 import jakarta.validation.Valid;
-import org.springframework.http.HttpStatus;
+
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.*;
 
 /** 판매자 이미지 변경과 편집용 조회를 제공합니다. 임의 객체 키는 입력받지 않습니다. */
@@ -23,49 +27,59 @@ public class ProductImageController {
     }
 
     @PostMapping("/image-uploads")
-    public ImageResponse.Upload issue(
+    public ApiResponse<ImageResponse.Upload> issue(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID productId,
             @Valid @RequestBody ImageUploadRequest r) {
-        return service.issue(UUID.fromString(jwt.getSubject()), productId, r);
+        ImageResponse.Upload response =
+                service.issue(UUID.fromString(jwt.getSubject()), productId, r);
+        return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 
     @PostMapping("/images/{imageId}/completion")
-    public ImageResponse complete(
+    public ApiResponse<ImageResponse> complete(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID productId,
             @PathVariable UUID imageId) {
-        return service.complete(UUID.fromString(jwt.getSubject()), productId, imageId);
+        ImageResponse response =
+                service.complete(UUID.fromString(jwt.getSubject()), productId, imageId);
+        return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 
     @GetMapping("/images")
-    public List<ImageResponse> list(
+    public ApiResponse<List<ImageResponse>> list(
             @AuthenticationPrincipal Jwt jwt, @PathVariable UUID productId) {
-        return service.list(UUID.fromString(jwt.getSubject()), productId);
+        List<ImageResponse> response = service.list(UUID.fromString(jwt.getSubject()), productId);
+        return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 
     @GetMapping("/images/{imageId}/download-url")
-    public ImageResponse.Download download(
+    public ApiResponse<ImageResponse.Download> download(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID productId,
             @PathVariable UUID imageId) {
-        return service.download(UUID.fromString(jwt.getSubject()), productId, imageId);
+        ImageResponse.Download response =
+                service.download(UUID.fromString(jwt.getSubject()), productId, imageId);
+        return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 
     @PutMapping("/images")
-    public List<ImageResponse> reorder(
+    public ApiResponse<List<ImageResponse>> reorder(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID productId,
             @Valid @RequestBody ImageOrderRequest r) {
-        return service.reorder(UUID.fromString(jwt.getSubject()), productId, r);
+        List<ImageResponse> response =
+                service.reorder(UUID.fromString(jwt.getSubject()), productId, r);
+        return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 
     @DeleteMapping("/images/{imageId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void detach(
+    // 성공 본문을 반환하므로 Account의 삭제 API와 같이 HTTP 200을 사용합니다.
+    public ApiResponse<Void> detach(
             @AuthenticationPrincipal Jwt jwt,
             @PathVariable UUID productId,
             @PathVariable UUID imageId) {
         service.detach(UUID.fromString(jwt.getSubject()), productId, imageId);
+        return ApiResponse.onSuccess(null, SuccessCode.OK);
     }
 }

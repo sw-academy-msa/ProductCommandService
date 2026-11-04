@@ -4,18 +4,21 @@ import com.msa.product.domain.image.command.dto.request.*;
 import com.msa.product.domain.image.command.dto.response.ImageResponse;
 import com.msa.product.domain.image.command.service.ProductImageService;
 import com.msa.product.domain.image.entity.ProductImage;
+import com.msa.product.domain.image.exception.ImageErrorCode;
+import com.msa.product.domain.image.exception.ImageException;
 import com.msa.product.domain.image.repository.ProductImageRepository;
-import com.msa.product.domain.product.ProductError;
 import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.global.config.storage.ImageStorageProperties;
-import com.msa.product.global.error.BusinessException;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
-import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
+
 import java.time.*;
 import java.util.*;
 
@@ -48,25 +51,26 @@ public class ProductImageServiceImpl implements ProductImageService {
     public ImageResponse.Upload issue(UUID seller, UUID product, ImageUploadRequest request) {
         editable(seller, product);
         if (!policy.ready()) {
-            throw new BusinessException(ProductError.POLICY);
+            throw new ImageException(ImageErrorCode.POLICY);
         }
         if (!policy.allowedTypes().contains(request.contentType())
                 || !Set.of("image/jpeg", "image/png", "image/webp").contains(request.contentType())
                 || request.sizeBytes() <= 0
                 || request.sizeBytes() > policy.maxBytes()) {
-            throw new BusinessException(ProductError.INVALID);
+            throw new ImageException(ImageErrorCode.INVALID);
         }
         if (images.countByProductIdAndAttachedTrue(product) >= 10) {
-            throw new BusinessException(ProductError.STATE);
+            throw new ImageException(ImageErrorCode.STATE);
         }
         var image =
                 images.save(
-                        new ProductImage(
-                                product,
-                                seller,
-                                request.contentType(),
-                                request.sizeBytes(),
-                                clock.instant().plusSeconds(300)));
+                        ProductImage.builder()
+                                .product(product)
+                                .seller(seller)
+                                .type(request.contentType())
+                                .size(request.sizeBytes())
+                                .expiry(clock.instant().plusSeconds(300))
+                                .build());
         var put =
                 PutObjectRequest.builder()
                         .bucket(policy.bucket())
@@ -83,8 +87,13 @@ public class ProductImageServiceImpl implements ProductImageService {
                                         .build())
                         .url()
                         .toExternalForm();
-        return new ImageResponse.Upload(
-                image.id, url, image.contentType, image.sizeBytes, image.expiresAt);
+        return ImageResponse.Upload.builder()
+                .imageId(image.id)
+                .uploadUrl(url)
+                .contentType(image.contentType)
+                .sizeBytes(image.sizeBytes)
+                .expiresAt(image.expiresAt)
+                .build();
     }
 
     /** S3 호출에는 10초 상한이 있습니다. 같은 상품의 이미지 변경·심사 제출과 연결 검증을 직렬화합니다. */
@@ -95,11 +104,11 @@ public class ProductImageServiceImpl implements ProductImageService {
             return ImageResponse.from(image);
         }
         if (!policy.ready()) {
-            throw new BusinessException(ProductError.POLICY);
+            throw new ImageException(ImageErrorCode.POLICY);
         }
         if (!clock.instant().isBefore(image.expiresAt)
                 || images.countByProductIdAndAttachedTrue(product) >= 10) {
-            throw new BusinessException(ProductError.STATE);
+            throw new ImageException(ImageErrorCode.STATE);
         }
         try {
             var head =
@@ -110,7 +119,7 @@ public class ProductImageServiceImpl implements ProductImageService {
                                     .build());
             if (head.contentLength() != image.sizeBytes
                     || !image.contentType.equals(head.contentType())) {
-                throw new BusinessException(ProductError.INVALID);
+                throw new ImageException(ImageErrorCode.INVALID);
             }
             // MIME 선언만 믿지 않고 파일 서명을 확인합니다. SVG·GIF 등 능동 콘텐츠/애니메이션 형식은 받지 않습니다.
             byte[] header =
@@ -123,7 +132,7 @@ public class ProductImageServiceImpl implements ProductImageService {
                                             .build())
                             .asByteArray();
             if (!matches(image.contentType, header)) {
-                throw new BusinessException(ProductError.INVALID);
+                throw new ImageException(ImageErrorCode.INVALID);
             }
             image.objectKey = "product-images/" + product + "/" + id;
             // 임시 업로드 URL로 다시 PUT해도 연결된 객체는 바뀌지 않게 서버 전용 키로 복사합니다.
@@ -142,10 +151,10 @@ public class ProductImageServiceImpl implements ProductImageService {
             return ImageResponse.from(image);
         } catch (S3Exception ex) {
             // 객체 미존재·ETag 경합과 S3 장애를 구분하고 원문 주소·서명은 응답/로그에 노출하지 않습니다.
-            throw new BusinessException(
+            throw new ImageException(
                     ex.statusCode() == 404 || ex.statusCode() == 412
-                            ? ProductError.INVALID
-                            : ProductError.POLICY);
+                            ? ImageErrorCode.INVALID
+                            : ImageErrorCode.POLICY);
         }
     }
 
@@ -153,7 +162,7 @@ public class ProductImageServiceImpl implements ProductImageService {
     public List<ImageResponse> list(UUID seller, UUID product) {
         var p =
                 products.findById(product)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                        .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         p.requireOwner(seller);
         return images.findByProductIdAndAttachedTrueOrderByPositionAsc(product).stream()
                 .map(ImageResponse::from)
@@ -167,7 +176,7 @@ public class ProductImageServiceImpl implements ProductImageService {
         if (ids.size() != request.imageIds().size()
                 || !ids.contains(request.representativeId())
                 || !ids.equals(new HashSet<>(current.stream().map(i -> i.id).toList()))) {
-            throw new BusinessException(ProductError.INVALID);
+            throw new ImageException(ImageErrorCode.INVALID);
         }
         for (var image : current) {
             image.position = request.imageIds().indexOf(image.id);
@@ -183,14 +192,14 @@ public class ProductImageServiceImpl implements ProductImageService {
     public ImageResponse.Download download(UUID seller, UUID product, UUID id) {
         var p =
                 products.findById(product)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                        .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         p.requireOwner(seller);
         var image = owned(seller, product, id);
         if (!image.attached) {
-            throw new BusinessException(ProductError.NOT_FOUND);
+            throw new ImageException(ImageErrorCode.NOT_FOUND);
         }
         if (!policy.ready()) {
-            throw new BusinessException(ProductError.POLICY);
+            throw new ImageException(ImageErrorCode.POLICY);
         }
         var get = GetObjectRequest.builder().bucket(policy.bucket()).key(image.objectKey).build();
         var url =
@@ -202,7 +211,10 @@ public class ProductImageServiceImpl implements ProductImageService {
                                         .build())
                         .url()
                         .toExternalForm();
-        return new ImageResponse.Download(url, clock.instant().plusSeconds(300));
+        return ImageResponse.Download.builder()
+                .downloadUrl(url)
+                .expiresAt(clock.instant().plusSeconds(300))
+                .build();
     }
 
     public void detach(UUID seller, UUID product, UUID id) {
@@ -221,7 +233,7 @@ public class ProductImageServiceImpl implements ProductImageService {
 
     private void editable(UUID seller, UUID product) {
         products.lock(product)
-                .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND))
+                .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND))
                 .requireEditable(seller);
     }
 
@@ -232,11 +244,10 @@ public class ProductImageServiceImpl implements ProductImageService {
         }
         UUID productId =
                 images.findProductId(id)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
-        products.lock(productId).orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                        .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
+        products.lock(productId).orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         var image =
-                images.findById(id)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                images.findById(id).orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         if (image.storageCleaned
                 || image.expiresAt.isAfter(clock.instant().minus(Duration.ofHours(24)))) {
             return;
@@ -256,10 +267,9 @@ public class ProductImageServiceImpl implements ProductImageService {
 
     private ProductImage owned(UUID seller, UUID product, UUID id) {
         var image =
-                images.findById(id)
-                        .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                images.findById(id).orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         if (!image.productId.equals(product) || !image.sellerId.equals(seller)) {
-            throw new BusinessException(ProductError.NOT_OWNER);
+            throw new ImageException(ImageErrorCode.NOT_OWNER);
         }
         return image;
     }
