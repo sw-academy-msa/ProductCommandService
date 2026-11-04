@@ -58,3 +58,19 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot'
 상세 문서와 AGENTS.md는 기존 서비스의 규칙에 맞춰 Git에서 제외합니다.
 기존 추적 파일인 이 readMe.md는 유지합니다. 문서는 로컬에서만 제공되므로 클론에 포함되지 않습니다.
 Git add/commit/push는 실행하지 않습니다.
+
+## HTTP 응답 DTO
+
+상품·옵션·이미지·문의·재고 응답은 전용 DTO로 반환합니다. 외부 JSON 성공 응답은 Account와 같은 ApiResponse(success/code/message/data)로 감쌉니다. 프런트는 업무 데이터를 data에서 읽으며 등록 메타데이터의 카테고리는 data.categories입니다. DTO의 from 메서드와 기존 서비스 변환 로직은 유지합니다.
+
+일반 성공은 SuccessCode.OK(COMMON_SUCCESS), 상품·문의 생성은 HTTP 201과 SuccessCode.CREATED(COMMON_CREATED)를 사용합니다. 이미지 삭제는 HTTP 200과 data:null을 반환합니다. 오류 응답과 내부 /internal/v1/stock-reservations API는 기존 형식을 유지하므로 Order의 재고 계약은 바뀌지 않습니다. 공통 성공 응답에는 Cache-Control:no-store를 적용합니다.
+
+## 객체 생성 규칙
+
+응답 DTO와 업무 객체 생성은 Lombok 빌더를 사용합니다. DTO는 record 구조와 from 변환 메서드를 유지하고 필드명을 지정해 생성합니다. 엔티티 빌더는 기존 생성자에만 적용하여 UUID·초안 상태·재고 확보 만료 시각과 컬렉션 초기화를 보존합니다. JPA 기본 생성자, 업무 검증, 잠금과 상태 변경 로직은 별도로 유지합니다.
+Lombok은 Spring Boot가 관리하는 버전을 compileOnly·annotationProcessor로 사용하며 운영 실행 의존성으로 추가하지 않습니다. 빌더 문자열에는 입력값을 출력하지 않습니다.
+
+## 도메인 예외
+
+AccountService와 같이 상품·재고·이미지·문의의 exception 패키지에 도메인별 Exception과 ErrorCode를 둡니다. 각 예외는 공통 BusinessException을 상속하고 기존 GlobalExceptionHandler가 HTTP 응답으로 변환합니다. 서비스와 엔티티는 해당 도메인 예외를 사용합니다.
+내부 예외 타입을 구분하되 기존 PRODUCT_* 코드·HTTP 상태·메시지는 유지합니다. 특히 Order가 사용하는 PRODUCT_EXPIRED 계약은 바꾸지 않습니다. Account 인증·인가 실패도 기존 COMMON_UNAUTHORIZED·COMMON_FORBIDDEN 응답으로 유지합니다.
