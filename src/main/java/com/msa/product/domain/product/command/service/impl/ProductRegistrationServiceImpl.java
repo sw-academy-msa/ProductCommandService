@@ -1,14 +1,17 @@
 package com.msa.product.domain.product.command.service.impl;
 
-import com.msa.product.domain.product.ProductError;
+import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.command.dto.request.RegistrationRequests.*;
 import com.msa.product.domain.product.command.dto.response.*;
 import com.msa.product.domain.product.command.service.ProductRegistrationService;
 import com.msa.product.domain.product.entity.*;
+import com.msa.product.domain.product.exception.ProductErrorCode;
+import com.msa.product.domain.product.exception.ProductException;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.global.error.BusinessException;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.net.URI;
 import java.time.*;
 import java.util.*;
@@ -19,10 +22,13 @@ import java.util.*;
 public class ProductRegistrationServiceImpl implements ProductRegistrationService {
     private final ProductRepository products;
     private final Clock clock;
+    private final ProjectionOutboxService outbox;
 
-    public ProductRegistrationServiceImpl(ProductRepository products, Clock clock) {
+    public ProductRegistrationServiceImpl(
+            ProductRepository products, Clock clock, ProjectionOutboxService outbox) {
         this.products = products;
         this.clock = clock;
+        this.outbox = outbox;
     }
 
     public ProductResponse basic(UUID seller, UUID id, Basic r) {
@@ -34,10 +40,10 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
                                 || "http".equalsIgnoreCase(uri.getScheme()))
                         || uri.getHost() == null
                         || uri.getUserInfo() != null) {
-                    fail(ProductError.INVALID);
+                    fail(ProductErrorCode.INVALID);
                 }
             } catch (IllegalArgumentException ex) {
-                fail(ProductError.INVALID);
+                fail(ProductErrorCode.INVALID);
             }
         }
         p.name = r.name();
@@ -56,7 +62,10 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
                 .forEach(
                         a ->
                                 p.attributes.add(
-                                        new ProductAttribute(a.name().trim(), a.value().trim())));
+                                        ProductAttribute.builder()
+                                                .name(a.name().trim())
+                                                .value(a.value().trim())
+                                                .build()));
         return finish(p);
     }
 
@@ -68,14 +77,14 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
             var values = d.values().stream().map(String::trim).toList();
             if (values.stream().distinct().count() != values.size()
                     || dimensions.putIfAbsent(d.name().trim(), values) != null) {
-                fail(ProductError.INVALID);
+                fail(ProductErrorCode.INVALID);
             }
         }
         if (r.variants().stream().mapToLong(Variant::initialQuantity).sum() > Integer.MAX_VALUE) {
-            fail(ProductError.INVALID);
+            fail(ProductErrorCode.INVALID);
         }
         if (dimensions.isEmpty() && r.variants().size() > 1) {
-            fail(ProductError.INVALID);
+            fail(ProductErrorCode.INVALID);
         }
         Set<Map<String, String>> combinations = new HashSet<>();
         Set<UUID> requestedIds = new HashSet<>();
@@ -89,31 +98,36 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
                     .forEach(
                             (key, value) -> {
                                 if (selections.putIfAbsent(key.trim(), value.trim()) != null) {
-                                    fail(ProductError.INVALID);
+                                    fail(ProductErrorCode.INVALID);
                                 }
                             });
             if (!selections.keySet().equals(dimensions.keySet()) || !combinations.add(selections)) {
-                fail(ProductError.INVALID);
+                fail(ProductErrorCode.INVALID);
             }
             for (var entry : selections.entrySet()) {
                 if (!dimensions.get(entry.getKey()).contains(entry.getValue())) {
-                    fail(ProductError.INVALID);
+                    fail(ProductErrorCode.INVALID);
                 }
             }
             var label = optionLabel(dimensions, selections);
             if (label.length() > 500 || !labels.add(label)) {
-                fail(ProductError.INVALID);
+                fail(ProductErrorCode.INVALID);
             }
             ProductOption option;
             if (v.id() == null) {
-                option = new ProductOption(p, label, v.initialQuantity());
+                option =
+                        ProductOption.builder()
+                                .product(p)
+                                .label(label)
+                                .quantity(v.initialQuantity())
+                                .build();
             } else {
                 if (!requestedIds.add(v.id()) || !existing.containsKey(v.id())) {
-                    fail(ProductError.INVALID);
+                    fail(ProductErrorCode.INVALID);
                 }
                 option = existing.get(v.id());
                 if (option.reservedQuantity != 0 || option.confirmedQuantity != 0) {
-                    fail(ProductError.STATE);
+                    fail(ProductErrorCode.STATE);
                 }
             }
             option.label = label;
@@ -139,7 +153,12 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
         }
         dimensions.forEach(
                 (name, values) ->
-                        p.optionDimensions.add(new ProductOptionDimension(p, name, values)));
+                        p.optionDimensions.add(
+                                ProductOptionDimension.builder()
+                                        .product(p)
+                                        .name(name)
+                                        .values(values)
+                                        .build()));
         return finish(p);
     }
 
@@ -150,7 +169,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
                 || !seller.equals(snapshot.accountId())
                 || snapshot.dispatchAddress() == null
                 || snapshot.returnAddress() == null) {
-            fail(ProductError.POLICY);
+            fail(ProductErrorCode.POLICY);
         }
         p.price = r.price();
         p.shippingFee = r.shippingFee();
@@ -167,7 +186,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
     public ProductResponse schedule(UUID seller, UUID id, Schedule r) {
         var p = editable(seller, id, r.expectedVersion());
         if (r.startsAt() != null && !r.startsAt().toInstant().isAfter(clock.instant())) {
-            fail(ProductError.INVALID);
+            fail(ProductErrorCode.INVALID);
         }
         p.startsAt = r.startsAt() == null ? null : r.startsAt().toInstant();
         p.endsAt = p.startsAt == null ? null : p.startsAt.plus(Duration.ofHours(3));
@@ -180,7 +199,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
         var used = new HashSet<UUID>();
         for (var input : r.faqs()) {
             if (input.id() != null && !used.add(input.id())) {
-                fail(ProductError.INVALID);
+                fail(ProductErrorCode.INVALID);
             }
             var f = input.id() == null ? newFaq(p, seller, input) : faq(p, input.id());
             update(f, seller, input);
@@ -200,7 +219,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
     public ProductResponse addFaq(UUID seller, UUID id, long version, Faq r) {
         var p = faqEditable(seller, id, version);
         if (r.id() != null) {
-            fail(ProductError.INVALID);
+            fail(ProductErrorCode.INVALID);
         }
         p.faqs.add(newFaq(p, seller, r));
         return finish(p);
@@ -209,7 +228,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
     public ProductResponse updateFaq(UUID seller, UUID id, UUID faqId, long version, Faq r) {
         var p = faqEditable(seller, id, version);
         if (r.id() != null && !r.id().equals(faqId)) {
-            fail(ProductError.INVALID);
+            fail(ProductErrorCode.INVALID);
         }
         update(faq(p, faqId), seller, r);
         return finish(p);
@@ -232,16 +251,18 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
     private Product faqEditable(UUID seller, UUID id, long version) {
         var p = locked(seller, id, version);
         if (p.status == Product.Status.IN_REVIEW) {
-            fail(ProductError.STATE);
+            fail(ProductErrorCode.STATE);
         }
         return p;
     }
 
     private Product locked(UUID seller, UUID id, long version) {
-        var p = products.lock(id).orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+        var p =
+                products.lock(id)
+                        .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND));
         p.requireOwner(seller);
         if (p.version != version) {
-            fail(ProductError.STATE);
+            fail(ProductErrorCode.STATE);
         }
         return p;
     }
@@ -250,6 +271,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
         p.changeId = UUID.randomUUID();
         p.updatedAt = clock.instant();
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 
@@ -267,25 +289,37 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
     }
 
     private ProductAddress address(SellerShippingResponse.Location l) {
-        return new ProductAddress(l.postalCode(), l.roadAddress(), l.detailAddress());
+        return ProductAddress.builder()
+                .postalCode(l.postalCode())
+                .roadAddress(l.roadAddress())
+                .detailAddress(l.detailAddress())
+                .build();
     }
 
     private ProductFaq faq(Product p, UUID id) {
         return p.faqs.stream()
                 .filter(f -> f.id.equals(id))
                 .findFirst()
-                .orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+                .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND));
     }
 
     private ProductFaq newFaq(Product p, UUID seller, Faq input) {
-        var f = new ProductFaq(p, "", "", null, seller, clock.instant());
+        var f =
+                ProductFaq.builder()
+                        .product(p)
+                        .question("")
+                        .answer("")
+                        .suggestionId(null)
+                        .seller(seller)
+                        .now(clock.instant())
+                        .build();
         update(f, seller, input);
         return f;
     }
 
     private void update(ProductFaq f, UUID seller, Faq r) {
         if (!r.confirmed()) {
-            fail(ProductError.INVALID);
+            fail(ProductErrorCode.INVALID);
         }
         f.question = r.question().trim();
         f.answer = r.answer().trim();
@@ -294,7 +328,7 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
         f.confirmedAt = clock.instant();
     }
 
-    private void fail(ProductError error) {
-        throw new BusinessException(error);
+    private void fail(ProductErrorCode error) {
+        throw new ProductException(error);
     }
 }

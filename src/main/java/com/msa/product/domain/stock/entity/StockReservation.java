@@ -1,6 +1,9 @@
 package com.msa.product.domain.stock.entity;
 
 import jakarta.persistence.*;
+
+import lombok.Builder;
+
 import java.time.Instant;
 import java.util.*;
 
@@ -11,6 +14,14 @@ import java.util.*;
         schema = "product",
         indexes = @Index(name = "idx_reservation_expiry", columnList = "status,expiresAt"))
 public class StockReservation {
+    /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
+    public static class StockReservationBuilder {
+        @Override
+        public String toString() {
+            return "StockReservationBuilder[REDACTED]";
+        }
+    }
+
     public enum Status {
         HELD,
         PAYMENT_PROCESSING,
@@ -19,8 +30,7 @@ public class StockReservation {
         EXPIRED
     }
 
-    @Id
-    public UUID id;
+    @Id public UUID id;
 
     @Column(nullable = false, unique = true, updatable = false)
     public UUID orderId;
@@ -51,6 +61,26 @@ public class StockReservation {
     @Column(nullable = false, updatable = false)
     public long shippingFee;
 
+    // 주문 이력에 필요한 공개 정보를 확보 성공 시 고정합니다. Order가 Product 테이블을 읽지 않게 합니다.
+    public UUID sellerId;
+
+    @Column(length = 200)
+    public String productName;
+
+    @Column(length = 200)
+    public String brandOrStore;
+
+    public Integer dispatchBusinessDays;
+
+    @ElementCollection
+    @CollectionTable(
+            name = "stock_reservation_option_labels",
+            schema = "product",
+            joinColumns = @JoinColumn(name = "reservation_id"))
+    @MapKeyColumn(name = "option_id")
+    @Column(name = "option_label", length = 500)
+    public Map<UUID, String> optionLabels = new HashMap<>();
+
     @ElementCollection
     @CollectionTable(
             name = "stock_reservation_items",
@@ -62,6 +92,8 @@ public class StockReservation {
 
     protected StockReservation() {}
 
+    // 기존 생성자를 거쳐 필드 초기화를 유지하며 JPA 기본 생성자도 보존합니다.
+    @Builder
     public StockReservation(
             UUID order,
             UUID product,

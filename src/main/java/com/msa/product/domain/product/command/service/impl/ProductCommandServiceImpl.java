@@ -1,17 +1,20 @@
 package com.msa.product.domain.product.command.service.impl;
 
-import com.msa.product.domain.product.ProductError;
+import com.msa.product.domain.image.repository.ProductImageRepository;
+import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.command.dto.request.*;
 import com.msa.product.domain.product.command.dto.response.ProductResponse;
 import com.msa.product.domain.product.command.service.ProductCommandService;
 import com.msa.product.domain.product.entity.*;
+import com.msa.product.domain.product.exception.ProductErrorCode;
+import com.msa.product.domain.product.exception.ProductException;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.global.config.product.ProductPolicyProperties;
-import com.msa.product.global.error.BusinessException;
+
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.net.URI;
 import java.time.*;
 import java.util.*;
@@ -25,20 +28,23 @@ public class ProductCommandServiceImpl implements ProductCommandService {
     private final ProductImageRepository images;
     private final ProductPolicyProperties policy;
     private final Clock clock;
+    private final ProjectionOutboxService outbox;
 
     public ProductCommandServiceImpl(
             ProductRepository products,
             ProductImageRepository images,
             ProductPolicyProperties policy,
-            Clock clock) {
+            Clock clock,
+            ProjectionOutboxService outbox) {
         this.products = products;
         this.images = images;
         this.policy = policy;
         this.clock = clock;
+        this.outbox = outbox;
     }
 
     public ProductResponse create(UUID seller) {
-        var p = new Product(seller);
+        var p = Product.builder().sellerId(seller).build();
         p.createdAt = clock.instant();
         p.updatedAt = p.createdAt;
         return ProductResponse.from(products.saveAndFlush(p));
@@ -50,7 +56,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.requireEditable(seller);
         version(p, r.expectedVersion());
         if (p.registrationFormatVersion != 0) {
-            throw new BusinessException(ProductError.STATE);
+            throw new ProductException(ProductErrorCode.STATE);
         }
         p.changeId = UUID.randomUUID();
         p.updatedAt = clock.instant();
@@ -66,13 +72,13 @@ public class ProductCommandServiceImpl implements ProductCommandService {
                         != r.options().size()
                 || r.options().stream().mapToLong(SaveProductRequest.Option::quantity).sum()
                         > Integer.MAX_VALUE) {
-            throw new BusinessException(ProductError.INVALID);
+            throw new ProductException(ProductErrorCode.INVALID);
         }
         if (r.sourceUrl() != null && !r.sourceUrl().isBlank()) {
             validateUrl(r.sourceUrl());
         }
         if (r.startsAt() != null && !r.startsAt().toInstant().isAfter(clock.instant())) {
-            throw new BusinessException(ProductError.INVALID);
+            throw new ProductException(ProductErrorCode.INVALID);
         }
         p.name = r.name();
         p.description = r.description();
@@ -91,9 +97,17 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.options.clear();
         products.flush();
         r.options()
-                .forEach(o -> p.options.add(new ProductOption(p, o.label().trim(), o.quantity())));
+                .forEach(
+                        o ->
+                                p.options.add(
+                                        ProductOption.builder()
+                                                .product(p)
+                                                .label(o.label().trim())
+                                                .quantity(o.quantity())
+                                                .build()));
         p.status = Product.Status.DRAFT;
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 
@@ -102,7 +116,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.requireEditable(seller);
         version(p, expectedVersion);
         if (policy.categories().isEmpty()) {
-            throw new BusinessException(ProductError.POLICY);
+            throw new ProductException(ProductErrorCode.POLICY);
         }
         if (blank(p.name)
                 || blank(p.description)
@@ -123,7 +137,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
                 || p.startsAt == null
                 || !p.startsAt.isAfter(clock.instant())
                 || images.countByProductIdAndAttachedTrue(p.id) == 0) {
-            throw new BusinessException(ProductError.INVALID);
+            throw new ProductException(ProductErrorCode.INVALID);
         }
         p.status = Product.Status.IN_REVIEW;
         p.submittedAt = clock.instant();
@@ -132,6 +146,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.reviewerId = null;
         p.reviewedAt = null;
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 
@@ -139,13 +154,13 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         Product p = locked(id);
         version(p, r.expectedVersion());
         if (p.status != Product.Status.IN_REVIEW) {
-            throw new BusinessException(ProductError.STATE);
+            throw new ProductException(ProductErrorCode.STATE);
         }
         if (r.approved() && !p.startsAt.isAfter(clock.instant())) {
-            throw new BusinessException(ProductError.STATE);
+            throw new ProductException(ProductErrorCode.STATE);
         }
         if (!r.approved() && blank(r.reason())) {
-            throw new BusinessException(ProductError.INVALID);
+            throw new ProductException(ProductErrorCode.INVALID);
         }
         p.status = r.approved() ? Product.Status.APPROVED : Product.Status.REJECTED;
         p.reviewReason = r.reason();
@@ -153,16 +168,18 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.reviewedAt = clock.instant();
         p.updatedAt = clock.instant();
         products.flush();
+        outbox.productChanged(p);
         return ProductResponse.from(p);
     }
 
     private Product locked(UUID id) {
-        return products.lock(id).orElseThrow(() -> new BusinessException(ProductError.NOT_FOUND));
+        return products.lock(id)
+                .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND));
     }
 
     private void version(Product p, long expected) {
         if (p.version != expected) {
-            throw new BusinessException(ProductError.STATE);
+            throw new ProductException(ProductErrorCode.STATE);
         }
     }
 
@@ -180,7 +197,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
                 throw new IllegalArgumentException();
             }
         } catch (IllegalArgumentException ex) {
-            throw new BusinessException(ProductError.INVALID);
+            throw new ProductException(ProductErrorCode.INVALID);
         }
     }
 }

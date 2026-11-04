@@ -1,12 +1,15 @@
 package com.msa.product.domain.product.command.service.impl;
 
+import static org.assertj.core.api.Assertions.*;
+
+import com.msa.product.domain.product.exception.ProductException;
 import com.msa.product.global.config.security.SellerAccountProperties;
-import com.msa.product.global.error.BusinessException;
 import com.sun.net.httpserver.HttpServer;
+
 import org.junit.jupiter.api.*;
+
 import java.net.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import static org.assertj.core.api.Assertions.*;
 
 /** 로컬 HTTP fixture로 기존 Account 경로·Bearer 전달·거부·장애 시 차단을 확인합니다. 실제 Account 연동 검증과 구분합니다. */
 class SellerEligibilityServiceImplTest {
@@ -60,7 +63,7 @@ class SellerEligibilityServiceImplTest {
         for (int code : new int[] {401, 403, 404, 500, 503}) {
             status.set(code);
             assertThatThrownBy(() -> service.requireApproved("fixture-only"))
-                    .isInstanceOf(BusinessException.class);
+                    .isInstanceOf(ProductException.class);
         }
     }
 
@@ -69,19 +72,22 @@ class SellerEligibilityServiceImplTest {
         var seller = java.util.UUID.randomUUID();
         response =
                 """
-            {"accountId":"%s","dispatchAddress":{"postalCode":"00000","roadAddress":"테스트 출고 도로","detailAddress":""},
-             "returnAddress":{"postalCode":"00000","roadAddress":"테스트 반품 도로","detailAddress":""},"contactName":"사용하지 않는 합성 필드"}
-            """
+{"success":true,"code":"COMMON_SUCCESS","message":"fixture","data":{"accountId":"%s","dispatchAddress":{"postalCode":"00000","roadAddress":"테스트 출고 도로","detailAddress":""},
+ "returnAddress":{"postalCode":"00000","roadAddress":"테스트 반품 도로","detailAddress":""},"contactName":"사용하지 않는 합성 필드"}}
+"""
                         .formatted(seller);
         var result = service.shipping("fixture-only", seller);
         assertThat(result.dispatchAddress().postalCode()).isEqualTo("00000");
         assertThatThrownBy(() -> service.shipping("fixture-only", java.util.UUID.randomUUID()))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(ProductException.class);
+        response = "{\"success\":false,\"data\":null}";
+        assertThatThrownBy(() -> service.shipping("fixture-only", seller))
+                .isInstanceOf(ProductException.class);
         response = "{}";
         assertThatThrownBy(() -> service.shipping("fixture-only", seller))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(ProductException.class);
         response = "";
         assertThatThrownBy(() -> service.shipping("fixture-only", seller))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(ProductException.class);
     }
 }

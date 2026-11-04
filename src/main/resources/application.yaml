@@ -19,12 +19,29 @@ spring:
         default_schema: product
         jdbc:
           time_zone: UTC
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.block.ms: 2000
+        delivery.timeout.ms: 8000
+        request.timeout.ms: 3000
+        max.request.size: 4194304
+    admin:
+      auto-create: false
 server:
   port: ${SERVER_PORT:8081}
   shutdown: graceful
   # 외부 전달 헤더를 인증 사용자나 소유권의 근거로 사용하지 않습니다.
   forward-headers-strategy: none
 product:
+  outbox:
+    # 저장은 항상 수행하고 발행만 명시적으로 활성화합니다. 장애 중에도 미발행 이벤트를 보존합니다.
+    publisher-enabled: ${PRODUCT_OUTBOX_PUBLISHER_ENABLED:false}
   stock:
     # 서비스 토큰 발급·주체 계약은 Order 연동 때 확정합니다. 미설정 시 내부 HTTP API는 차단합니다.
     order-subject: ${ORDER_SERVICE_SUBJECT:}

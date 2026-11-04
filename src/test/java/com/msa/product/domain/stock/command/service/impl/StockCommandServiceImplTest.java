@@ -1,46 +1,78 @@
 package com.msa.product.domain.stock.command.service.impl;
 
+import static org.assertj.core.api.Assertions.*;
+
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.domain.stock.command.dto.request.*;
 import com.msa.product.domain.stock.command.dto.response.StockReservationResponse;
 import com.msa.product.domain.stock.command.service.StockCommandService;
+import com.msa.product.domain.stock.exception.StockException;
 import com.msa.product.domain.stock.query.service.StockStatusQueryService;
 import com.msa.product.domain.stock.repository.*;
 import com.msa.product.global.config.database.ProductDatabaseTestSupport;
 import com.msa.product.global.error.BusinessException;
+
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
+
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
-import static org.assertj.core.api.Assertions.*;
 
 /** 실제 PostgreSQL의 여러 커넥션으로 원자성·초과 확보·멱등·만료 경합을 검증합니다. */
 @SpringBootTest
 @ActiveProfiles("test")
 @Import(ProductDatabaseTestSupport.Time.class)
 class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
-    @Autowired
-    StockCommandService service;
-    @Autowired
-    StockStatusQueryService queries;
-    @Autowired
-    ProductRepository products;
-    @Autowired
-    StockReservationRepository reservations;
-    @Autowired
-    ActiveStockReservationRepository active;
-    @Autowired
-    TransactionTemplate tx;
-    @Autowired
-    MutableClock clock;
+    @Autowired StockCommandService service;
+    @Autowired StockStatusQueryService queries;
+    @Autowired ProductRepository products;
+    @Autowired StockReservationRepository reservations;
+    @Autowired ActiveStockReservationRepository active;
+    @Autowired TransactionTemplate tx;
+    @Autowired MutableClock clock;
     UUID product, optionA, optionB;
     Instant start = Instant.parse("2030-01-01T00:00:00Z");
+
+    @Test
+    void reservationKeepsTrustedOrderSnapshotAcrossRetries() throws Exception {
+        tx.executeWithoutResult(
+                s -> {
+                    var p = products.lock(product).orElseThrow();
+                    p.dispatchBusinessDays = 3;
+                    p.brandOrStore = "합성 판매처";
+                });
+        var input = request(UUID.randomUUID(), UUID.randomUUID(), 1, 1);
+        var first = service.reserve(input);
+        assertThat(first.sellerId()).isNotNull();
+        assertThat(first.productName()).isEqualTo("테스트 상품");
+        assertThat(first.dispatchBusinessDays()).isEqualTo(3);
+        assertThat(first.optionLabels()).containsKeys(optionA, optionB);
+        assertThat(first.brandOrStore()).isEqualTo("합성 판매처");
+        assertThat(first.optionLabels())
+                .containsExactlyInAnyOrderEntriesOf(Map.of(optionA, "기본 A", optionB, "기본 B"));
+        tx.executeWithoutResult(
+                s -> {
+                    var p = products.lock(product).orElseThrow();
+                    p.name = "원본이 나중에 바뀌어도 확보 당시 정보 유지";
+                    p.dispatchBusinessDays = 5;
+                });
+        var repeated = service.reserve(input);
+        assertThat(repeated.productName()).isEqualTo(first.productName());
+        assertThat(repeated.dispatchBusinessDays()).isEqualTo(first.dispatchBusinessDays());
+        assertThat(repeated.brandOrStore()).isEqualTo("합성 판매처");
+        assertThat(repeated.optionLabels())
+                .containsExactlyInAnyOrderEntriesOf(Map.of(optionA, "기본 A", optionB, "기본 B"));
+        var json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
+        var path = java.nio.file.Path.of("build/generated/order-stock-reply.json");
+        java.nio.file.Files.createDirectories(path.getParent());
+        java.nio.file.Files.writeString(path, json.writeValueAsString(repeated));
+    }
 
     @BeforeEach
     void setup() {
@@ -96,7 +128,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
     void multipleOptionsRollbackWhenOneIsInsufficient() {
         assertThatThrownBy(
                         () -> service.reserve(request(UUID.randomUUID(), UUID.randomUUID(), 2, 2)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThat(available(optionA)).isEqualTo(5);
         assertThat(available(optionB)).isEqualTo(1);
         assertThat(reservations.count()).isZero();
@@ -112,7 +144,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         assertThat(again.id()).isEqualTo(first.id());
         assertThat(again.expiresAt()).isEqualTo(start.plusSeconds(300));
         assertThatThrownBy(() -> service.reserve(request(order, buyer, 2, 1)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThat(available(optionA)).isEqualTo(4);
     }
 
@@ -121,7 +153,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         UUID buyer = UUID.randomUUID();
         service.reserve(request(UUID.randomUUID(), buyer, 1, 0));
         assertThatThrownBy(() -> service.reserve(request(UUID.randomUUID(), buyer, 1, 0)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
     }
 
     @Test
@@ -146,12 +178,12 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         clock.set(start.plusSeconds(500));
         service.expire(r.id());
         assertThatThrownBy(() -> service.release(r.id(), new ReleaseStockRequest(attempt, false)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         service.confirm(r.id(), attempt, start.plusSeconds(250));
         service.confirm(r.id(), attempt, start.plusSeconds(250));
         assertThat(available(optionA)).isEqualTo(4);
         assertThatThrownBy(() -> service.release(r.id(), new ReleaseStockRequest(attempt, true)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
     }
 
     @Test
@@ -160,9 +192,9 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         service.beginPayment(r.id(), UUID.randomUUID());
         UUID other = UUID.randomUUID();
         assertThatThrownBy(() -> service.confirm(r.id(), other, start.plusSeconds(100)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThatThrownBy(() -> service.release(r.id(), new ReleaseStockRequest(other, true)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
     }
 
     @Test
@@ -172,7 +204,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         service.beginPayment(r.id(), attempt);
         clock.set(start.plusSeconds(400));
         assertThatThrownBy(() -> service.confirm(r.id(), attempt, start.plusSeconds(301)))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         assertThat(available(optionA)).isEqualTo(4);
         // Order가 Payment 취소 완료를 확인한 뒤에만 해제할 수 있습니다.
         service.release(r.id(), new ReleaseStockRequest(attempt, true));
@@ -185,11 +217,11 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         var r = reserve();
         clock.set(start.plusSeconds(300));
         assertThatThrownBy(() -> service.beginPayment(r.id(), UUID.randomUUID()))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(StockException.class);
         clock.set(start.minusNanos(1));
-        assertThatThrownBy(this::reserve).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(this::reserve).isInstanceOf(StockException.class);
         clock.set(start.plusSeconds(10800));
-        assertThatThrownBy(this::reserve).isInstanceOf(BusinessException.class);
+        assertThatThrownBy(this::reserve).isInstanceOf(StockException.class);
     }
 
     @Test

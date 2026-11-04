@@ -1,11 +1,18 @@
 package com.msa.product.domain.product.command.controller;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import com.msa.product.domain.image.entity.ProductImage;
+import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.domain.product.command.service.*;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.domain.image.entity.ProductImage;
-import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.global.config.database.ProductDatabaseTestSupport;
+
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,13 +23,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
+
 import java.time.*;
 import java.util.*;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 /** 실제 MVC·JPA·PostgreSQL로 판매자 소유권·입력·심사 전이를 검증합니다. JWT 서명 자체는 별도 기존 테스트 대상입니다. */
 @SpringBootTest(
@@ -34,20 +37,13 @@ import static org.mockito.Mockito.*;
 @ActiveProfiles("test")
 @Import(ProductDatabaseTestSupport.Time.class)
 class ProductCommandControllerTest extends ProductDatabaseTestSupport {
-    @Autowired
-    MockMvc mvc;
-    @Autowired
-    ProductRepository products;
-    @Autowired
-    ProductImageRepository images;
-    @Autowired
-    ProductCommandService commands;
-    @Autowired
-    TransactionTemplate tx;
-    @Autowired
-    MutableClock clock;
-    @MockitoBean
-    SellerEligibilityService eligibility;
+    @Autowired MockMvc mvc;
+    @Autowired ProductRepository products;
+    @Autowired ProductImageRepository images;
+    @Autowired ProductCommandService commands;
+    @Autowired TransactionTemplate tx;
+    @Autowired MutableClock clock;
+    @MockitoBean SellerEligibilityService eligibility;
     UUID seller = UUID.randomUUID();
 
     @BeforeEach
@@ -63,11 +59,11 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
 
     String body(long version) {
         return """
-            {"expectedVersion":%d,"name":"테스트 노트","description":"새 상품입니다","sourceUrl":"https://example.com/item",
-             "category":"문구","price":1000,"shippingFee":0,"dispatchBusinessDays":2,"perAccountLimit":3,
-             "disposalReason":"남은 재고","startsAt":"2030-01-02T09:00:00+09:00",
-             "options":[{"label":"기본","quantity":5},{"label":"큰 규격","quantity":2}]}
-            """
+{"expectedVersion":%d,"name":"테스트 노트","description":"새 상품입니다","sourceUrl":"https://example.com/item",
+ "category":"문구","price":1000,"shippingFee":0,"dispatchBusinessDays":2,"perAccountLimit":3,
+ "disposalReason":"남은 재고","startsAt":"2030-01-02T09:00:00+09:00",
+ "options":[{"label":"기본","quantity":5},{"label":"큰 규격","quantity":2}]}
+"""
                 .formatted(version);
     }
 
@@ -75,8 +71,8 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     void createsSellerOwnedDraftFromJwtAndChecksAccount() throws Exception {
         mvc.perform(post("/api/v1/seller/products").with(seller(seller)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.sellerId").value(seller.toString()))
-                .andExpect(jsonPath("$.status").value("DRAFT"));
+                .andExpect(jsonPath("$.data.sellerId").value(seller.toString()))
+                .andExpect(jsonPath("$.data.status").value("DRAFT"));
         verify(eligibility).requireApproved(anyString());
     }
 
@@ -110,8 +106,8 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                 .contentType("application/json")
                                 .content(body(p.version())))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.options.length()").value(2))
-                .andExpect(jsonPath("$.endsAt").value("2030-01-02T03:00:00Z"));
+                .andExpect(jsonPath("$.data.options.length()").value(2))
+                .andExpect(jsonPath("$.data.endsAt").value("2030-01-02T03:00:00Z"));
         var saved = products.findById(p.id()).orElseThrow();
         for (String invalid :
                 List.of(
@@ -194,7 +190,7 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                 .contentType("application/json")
                                 .content("{\"expectedVersion\":" + version + "}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("IN_REVIEW"));
+                .andExpect(jsonPath("$.data.status").value("IN_REVIEW"));
         version = products.findById(p.id()).orElseThrow().version;
         mvc.perform(
                         post("/api/v1/admin/product-reviews/" + p.id() + "/decisions")
@@ -211,7 +207,7 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                 .contentType("application/json")
                                 .content("{\"expectedVersion\":" + version + ",\"approved\":true}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("APPROVED"));
+                .andExpect(jsonPath("$.data.status").value("APPROVED"));
         mvc.perform(
                         put("/api/v1/seller/products/" + p.id())
                                 .with(seller(seller))
@@ -236,8 +232,8 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     @Test
     void accountUnavailabilityFailsClosed() throws Exception {
         doThrow(
-                        new com.msa.product.global.error.BusinessException(
-                                com.msa.product.domain.product.ProductError.POLICY))
+                        new com.msa.product.domain.product.exception.ProductException(
+                                com.msa.product.domain.product.exception.ProductErrorCode.POLICY))
                 .when(eligibility)
                 .requireApproved(anyString());
         mvc.perform(post("/api/v1/seller/products").with(seller(seller)))
@@ -259,7 +255,13 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                         jwt().jwt(
                                                         j ->
                                                                 j.subject(
-                                                                        "00000000-0000-0000-0000-000000000099"))
+                                                                                "00000000-0000-0000-0000-000000000099")
+                                                                        .claim(
+                                                                                "principal_type",
+                                                                                "service")
+                                                                        .claim(
+                                                                                "client_id",
+                                                                                "order-command-service"))
                                                 .authorities(scope)))
                 .andExpect(status().isNotFound());
     }

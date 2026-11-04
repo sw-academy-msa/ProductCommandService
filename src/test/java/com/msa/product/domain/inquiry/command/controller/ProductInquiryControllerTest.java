@@ -1,10 +1,17 @@
 package com.msa.product.domain.inquiry.command.controller;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.reset;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import com.msa.product.domain.inquiry.repository.ProductInquiryRepository;
 import com.msa.product.domain.product.command.service.SellerEligibilityService;
 import com.msa.product.domain.product.entity.Product;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.domain.inquiry.repository.ProductInquiryRepository;
 import com.msa.product.global.config.database.ProductDatabaseTestSupport;
+
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,14 +22,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionTemplate;
+
 import tools.jackson.databind.ObjectMapper;
+
 import java.time.*;
 import java.util.*;
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.reset;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** 상품 문의 쓰기와 판매자 답변·FAQ의 원자성·소유권·Query 경계를 실제 DB로 검증합니다. */
 @SpringBootTest
@@ -30,20 +34,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @Import(ProductDatabaseTestSupport.Time.class)
 class ProductInquiryControllerTest extends ProductDatabaseTestSupport {
-    @Autowired
-    MockMvc mvc;
-    @Autowired
-    ProductRepository products;
-    @Autowired
-    ProductInquiryRepository inquiries;
-    @Autowired
-    ObjectMapper mapper;
-    @Autowired
-    TransactionTemplate tx;
-    @Autowired
-    MutableClock clock;
-    @MockitoBean
-    SellerEligibilityService eligibility;
+    @Autowired MockMvc mvc;
+    @Autowired ProductRepository products;
+    @Autowired ProductInquiryRepository inquiries;
+    @Autowired ObjectMapper mapper;
+    @Autowired TransactionTemplate tx;
+    @Autowired MutableClock clock;
+    @MockitoBean SellerEligibilityService eligibility;
     UUID seller, buyer, product;
 
     @BeforeEach
@@ -74,13 +71,14 @@ class ProductInquiryControllerTest extends ProductDatabaseTestSupport {
                                         .contentType("application/json")
                                         .content("{\"question\":\"상품 크기는 어떻게 되나요?\"}"))
                         .andExpect(status().isCreated())
-                        .andExpect(jsonPath("$.buyerId").value(buyer.toString()))
+                        .andExpect(jsonPath("$.data.buyerId").value(buyer.toString()))
                         .andReturn();
         return UUID.fromString(
                 mapper.readTree(
                                 result.getResponse()
                                         .getContentAsString(
                                                 java.nio.charset.StandardCharsets.UTF_8))
+                        .path("data")
                         .get("id")
                         .asText());
     }
@@ -144,7 +142,7 @@ class ProductInquiryControllerTest extends ProductDatabaseTestSupport {
                 .isEqualTo(1);
         mvc.perform(get("/api/v1/seller/products/" + product).with(actor(seller, "SELLER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.faqs[0].sourceInquiryId").value(id.toString()));
+                .andExpect(jsonPath("$.data.faqs[0].sourceInquiryId").value(id.toString()));
     }
 
     @Test
@@ -155,23 +153,24 @@ class ProductInquiryControllerTest extends ProductDatabaseTestSupport {
                                 .with(actor(seller, "SELLER"))
                                 .contentType("application/json")
                                 .content(
-                                        "{\"expectedVersion\":0,\"answer\":\"확인 후 답변합니다.\",\"publishToFaq\":false}"))
+                                        "{\"expectedVersion\":0,\"answer\":\"확인 후"
+                                            + " 답변합니다.\",\"publishToFaq\":false}"))
                 .andExpect(status().isOk());
         assertThat(tx.<Integer>execute(s -> products.findById(product).orElseThrow().faqs.size()))
                 .isZero();
         mvc.perform(get("/api/v1/seller/products/inquiries").with(actor(seller, "SELLER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items.length()").value(1));
+                .andExpect(jsonPath("$.data.items.length()").value(1));
         mvc.perform(
                         get("/api/v1/seller/products/inquiries")
                                 .param("unanswered", "true")
                                 .with(actor(seller, "SELLER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items.length()").value(0));
+                .andExpect(jsonPath("$.data.items.length()").value(0));
         mvc.perform(
                         get("/api/v1/seller/products/inquiries")
                                 .with(actor(UUID.randomUUID(), "SELLER")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items.length()").value(0));
+                .andExpect(jsonPath("$.data.items.length()").value(0));
     }
 }

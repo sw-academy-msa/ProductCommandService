@@ -6,8 +6,8 @@ Java 21 / Spring Boot 4.1.1 / Spring Cloud 2025.1.4 / Gradle 9.8.2.
 AccountService의 초기 구성과 스타일을 참고한 MVC 서비스입니다.
 상품 초안·옵션 저장, 심사 제출·승인·반려, 이미지 업로드 권한·검증·연결과 재고 확보·확정·해제 API를 구현했습니다.
 판매자 등록은 단계별 PUT으로 저장하며 브랜드·자유 상세 정보·구조화된 옵션·Account 배송 주소 스냅샷·판매자 확인 FAQ를 보존합니다.
-본인 상품 관리 목록·운영자 심사 목록·상품 문의·판매자 답변도 제공합니다. AI 생성과 Kafka 전파는 아직 연결하지 않았습니다.
-상품은 검사 후 승인하며 승인 전에는 재고를 확보할 수 없습니다. Product Query와 Kafka/Outbox는 아직 구현하지 않았습니다.
+본인 상품 관리 목록·운영자 심사 목록·상품 문의·판매자 답변도 제공합니다. AI 생성은 아직 연결하지 않았습니다.
+상품은 검사 후 승인하며 승인 전에는 재고를 확보할 수 없습니다. 승인·재고·FAQ·문의 변경은 Outbox와 Kafka를 통해 별도 Product Query에 전달할 수 있습니다. 두 앱의 발행/소비 활성화가 필요합니다.
 재고 확보는 5분이며, Order의 결제 진행 전이와 실제 승인 시각에 따라 확정·해제합니다.
 API 목록·설정·내부 인증 계약·검증 범위는 [상품·재고 API 안내](docs/product-command-api.md)를 확인합니다.
 [상품 등록 7단계 프런트 연동 안내](docs/product-registration.md)에 단계별 요청과 기존 전체 PUT 전환 방법을 정리했습니다.
@@ -45,6 +45,11 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot'
 
 ## 문서
 
+- [Outbox 저장·Kafka 발행·Query 이벤트 계약과 로컬 실행](contracts/product-projection-v1.md)
+- [Order 내부 확보 응답 스냅샷 확장과 책임 경계](contracts/order-stock-snapshot.md)
+- 상품 승인·재고·FAQ·문의 변경은 업무와 같은 트랜잭션으로 Outbox에 저장합니다. Kafka 발행은 PRODUCT_OUTBOX_PUBLISHER_ENABLED=true로 별도 활성화합니다.
+- 개발 스키마는 ddl-auto=update로 반영합니다. 운영 스키마 관리 방식은 배포 준비 시 정하며 운영 validate 설정은 유지합니다.
+
 - [조사 결과·의존성과 패키지·모델 초안·미정 정책](docs/initial-design.md)
 - [Figma 기반 화면 요구사항·서비스 경계·구현 계획](docs/figma-product-command-plan.md)
 - [실행·운영 스키마·검증 범위](docs/development.md)
@@ -53,3 +58,19 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot'
 상세 문서와 AGENTS.md는 기존 서비스의 규칙에 맞춰 Git에서 제외합니다.
 기존 추적 파일인 이 readMe.md는 유지합니다. 문서는 로컬에서만 제공되므로 클론에 포함되지 않습니다.
 Git add/commit/push는 실행하지 않습니다.
+
+## HTTP 응답 DTO
+
+상품·옵션·이미지·문의·재고 응답은 전용 DTO로 반환합니다. 외부 JSON 성공 응답은 Account와 같은 ApiResponse(success/code/message/data)로 감쌉니다. 프런트는 업무 데이터를 data에서 읽으며 등록 메타데이터의 카테고리는 data.categories입니다. DTO의 from 메서드와 기존 서비스 변환 로직은 유지합니다.
+
+일반 성공은 SuccessCode.OK(COMMON_SUCCESS), 상품·문의 생성은 HTTP 201과 SuccessCode.CREATED(COMMON_CREATED)를 사용합니다. 이미지 삭제는 HTTP 200과 data:null을 반환합니다. 오류 응답과 내부 /internal/v1/stock-reservations API는 기존 형식을 유지하므로 Order의 재고 계약은 바뀌지 않습니다. 공통 성공 응답에는 Cache-Control:no-store를 적용합니다.
+
+## 객체 생성 규칙
+
+응답 DTO와 업무 객체 생성은 Lombok 빌더를 사용합니다. DTO는 record 구조와 from 변환 메서드를 유지하고 필드명을 지정해 생성합니다. 엔티티 빌더는 기존 생성자에만 적용하여 UUID·초안 상태·재고 확보 만료 시각과 컬렉션 초기화를 보존합니다. JPA 기본 생성자, 업무 검증, 잠금과 상태 변경 로직은 별도로 유지합니다.
+Lombok은 Spring Boot가 관리하는 버전을 compileOnly·annotationProcessor로 사용하며 운영 실행 의존성으로 추가하지 않습니다. 빌더 문자열에는 입력값을 출력하지 않습니다.
+
+## 도메인 예외
+
+AccountService와 같이 상품·재고·이미지·문의의 exception 패키지에 도메인별 Exception과 ErrorCode를 둡니다. 각 예외는 공통 BusinessException을 상속하고 기존 GlobalExceptionHandler가 HTTP 응답으로 변환합니다. 서비스와 엔티티는 해당 도메인 예외를 사용합니다.
+내부 예외 타입을 구분하되 기존 PRODUCT_* 코드·HTTP 상태·메시지는 유지합니다. 특히 Order가 사용하는 PRODUCT_EXPIRED 계약은 바꾸지 않습니다. Account 인증·인가 실패도 기존 COMMON_UNAUTHORIZED·COMMON_FORBIDDEN 응답으로 유지합니다.

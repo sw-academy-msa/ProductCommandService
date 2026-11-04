@@ -1,6 +1,9 @@
 package com.msa.product.domain.product.entity;
 
 import jakarta.persistence.*;
+
+import lombok.Builder;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -8,8 +11,15 @@ import java.util.UUID;
 @Entity
 @Table(name = "product_faqs", schema = "product")
 public class ProductFaq {
-    @Id
-    public UUID id;
+    /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
+    public static class ProductFaqBuilder {
+        @Override
+        public String toString() {
+            return "ProductFaqBuilder[REDACTED]";
+        }
+    }
+
+    @Id public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
@@ -32,6 +42,8 @@ public class ProductFaq {
 
     protected ProductFaq() {}
 
+    // 기존 생성자를 거쳐 필드 초기화를 유지하며 JPA 기본 생성자도 보존합니다.
+    @Builder
     public ProductFaq(
             Product product,
             String question,
