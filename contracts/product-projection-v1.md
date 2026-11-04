@@ -1,5 +1,7 @@
 # Product Command → Query 이벤트 계약
 
+PRODUCT_UPSERT는 envelope 전체를 직렬화한 UTF-8 본문 기준 최대 3 MiB를 허용합니다. 생산자 max.request.size 4 MiB에서 키·헤더·배치 오버헤드를 위한 여유를 두는 전송 정책이며 초과 시 업무 트랜잭션을 실패시켜 Outbox에 저장하지 않습니다. INQUIRY_UPSERT에는 이 상품 전용 크기 검사를 적용하지 않습니다. 이 제한만으로 별도 브로커·토픽·소비자 설정의 수신 한도 충족을 보장하지는 않습니다.
+
 상품 승인·공개 FAQ 변경·재고 확보/확정/해제/안전한 만료 반환은 원본 변경과 같은 PostgreSQL 트랜잭션에서 product.outbox_events에 저장합니다. 초안과 반려는 공개 이벤트를 생성하지 않습니다. 현재 승인 취소·숨김 API는 없으며 PRODUCT_UNPUBLISHED를 발행한다고 가정하지 않습니다.
 
 상품 토픽은 stockdrop.product.public.v1, 문의 생성/판매자 답변 토픽은 stockdrop.product.inquiries.v1입니다. key는 상품 UUID이며 소비자별 그룹을 분리합니다. envelope는 eventId, schemaVersion=1, type, aggregateId, aggregateVersion, occurredAt, product, inquiry입니다. Query의 ProjectionEvent 및 ProductSnapshot과 호환됩니다.

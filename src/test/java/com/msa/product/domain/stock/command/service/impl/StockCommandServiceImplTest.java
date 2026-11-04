@@ -53,6 +53,9 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         assertThat(first.productName()).isEqualTo("테스트 상품");
         assertThat(first.dispatchBusinessDays()).isEqualTo(3);
         assertThat(first.optionLabels()).containsKeys(optionA, optionB);
+        assertThat(first.brandOrStore()).isEqualTo("합성 판매처");
+        assertThat(first.optionLabels())
+                .containsExactlyInAnyOrderEntriesOf(Map.of(optionA, "기본 A", optionB, "기본 B"));
         tx.executeWithoutResult(
                 s -> {
                     var p = products.lock(product).orElseThrow();
@@ -62,6 +65,9 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         var repeated = service.reserve(input);
         assertThat(repeated.productName()).isEqualTo(first.productName());
         assertThat(repeated.dispatchBusinessDays()).isEqualTo(first.dispatchBusinessDays());
+        assertThat(repeated.brandOrStore()).isEqualTo("합성 판매처");
+        assertThat(repeated.optionLabels())
+                .containsExactlyInAnyOrderEntriesOf(Map.of(optionA, "기본 A", optionB, "기본 B"));
         var json = tools.jackson.databind.json.JsonMapper.builder().findAndAddModules().build();
         var path = java.nio.file.Path.of("build/generated/order-stock-reply.json");
         java.nio.file.Files.createDirectories(path.getParent());

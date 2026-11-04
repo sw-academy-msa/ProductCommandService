@@ -6,6 +6,8 @@ import com.msa.product.domain.outbox.entity.OutboxEvent;
 import com.msa.product.domain.outbox.repository.ProjectionSequenceRepository;
 import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.entity.Product;
+import com.msa.product.domain.product.exception.ProductErrorCode;
+import com.msa.product.domain.product.exception.ProductException;
 
 import jakarta.persistence.EntityManager;
 
@@ -14,6 +16,7 @@ import org.springframework.transaction.annotation.*;
 
 import tools.jackson.databind.json.JsonMapper;
 
+import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
 
@@ -21,6 +24,8 @@ import java.util.*;
 @Service
 @Transactional(propagation = Propagation.MANDATORY)
 public class ProjectionOutboxServiceImpl implements ProjectionOutboxService {
+    // 생산자 4 MiB 한도에서 키·헤더·배치 오버헤드 여유를 확보하는 상품 스냅샷 전용 상한입니다.
+    static final int MAX_PRODUCT_PAYLOAD_BYTES = 3 * 1024 * 1024;
     private final EntityManager em;
     private final ProjectionSequenceRepository sequences;
     private final ProductImageRepository images;
@@ -210,12 +215,17 @@ public class ProjectionOutboxServiceImpl implements ProjectionOutboxService {
                         product,
                         "inquiry",
                         inquiry);
+        String payload = json.writeValueAsString(event);
+        if ("PRODUCT_UPSERT".equals(type)
+                && payload.getBytes(StandardCharsets.UTF_8).length > MAX_PRODUCT_PAYLOAD_BYTES) {
+            throw new ProductException(ProductErrorCode.INVALID);
+        }
         em.persist(
                 OutboxEvent.builder()
                         .id(id)
                         .topic(topic)
                         .productId(key)
-                        .payload(json.writeValueAsString(event))
+                        .payload(payload)
                         .now(now)
                         .build());
     }

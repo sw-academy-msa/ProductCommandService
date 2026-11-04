@@ -3,6 +3,8 @@ package com.msa.product.domain.outbox.service.impl;
 import com.msa.product.domain.outbox.repository.OutboxEventRepository;
 import com.msa.product.domain.outbox.service.OutboxPublisher;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -10,12 +12,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /** Outbox 행만 잠그고 JPA 변경 감지로 결과를 기록합니다. 전송 중 업무 원본 행은 잠그지 않습니다. */
 @Service
 @ConditionalOnProperty(name = "product.outbox.publisher-enabled", havingValue = "true")
 public class OutboxPublisherImpl implements OutboxPublisher {
+    private static final Logger log = LoggerFactory.getLogger(OutboxPublisherImpl.class);
     private final OutboxEventRepository events;
     private final KafkaTemplate<String, byte[]> kafka;
     private final Clock clock;
@@ -44,6 +48,16 @@ public class OutboxPublisherImpl implements OutboxPublisher {
             long delay = Math.min(60, 1L << Math.min(6, event.attempts));
             event.attempts++;
             event.nextAttemptAt = clock.instant().plusSeconds(delay);
+            // 메시지·본문·스택 대신 전송 원인의 타입만 기록해 민감정보 노출을 막습니다.
+            Throwable cause =
+                    failure instanceof ExecutionException && failure.getCause() != null
+                            ? failure.getCause()
+                            : failure;
+            log.warn(
+                    "Outbox 발행 실패: eventId={}, attempts={}, causeType={}",
+                    event.id,
+                    event.attempts,
+                    cause.getClass().getName());
             return true;
         }
         // DB 저장 실패를 전송 실패로 삼키지 않습니다. 롤백되면 다음 시도에 같은 이벤트가 다시 전송됩니다.

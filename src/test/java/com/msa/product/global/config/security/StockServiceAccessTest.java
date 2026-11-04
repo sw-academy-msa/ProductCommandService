@@ -28,6 +28,23 @@ class StockServiceAccessTest {
     @Test
     void acceptsOnlyDesignatedOrderServiceAndScope() {
         var access = new StockServiceAccess(subject);
+        // 다른 조건은 유지하고 각 식별 claim만 제거해 누락 자체가 거절되는지 확인합니다.
+        var missingType = auth(subject, "service", "order-command-service", "product.stock");
+        var missingClient = auth(subject, "service", "order-command-service", "product.stock");
+        for (var claim : List.of("principal_type", "client_id")) {
+            var original = claim.equals("principal_type") ? missingType : missingClient;
+            var token =
+                    Jwt.withTokenValue("synthetic")
+                            .headers(h -> h.putAll(original.getToken().getHeaders()))
+                            .claims(
+                                    c -> {
+                                        c.putAll(original.getToken().getClaims());
+                                        c.remove(claim);
+                                    })
+                            .build();
+            assertThat(access.allowed(new JwtAuthenticationToken(token, original.getAuthorities())))
+                    .isFalse();
+        }
         assertThat(
                         access.allowed(
                                 auth(subject, "service", "order-command-service", "product.stock")))
