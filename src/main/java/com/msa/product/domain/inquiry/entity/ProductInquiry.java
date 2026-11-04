@@ -1,6 +1,9 @@
 package com.msa.product.domain.inquiry.entity;
 
 import jakarta.persistence.*;
+
+import lombok.Builder;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -11,10 +14,16 @@ import java.util.UUID;
         schema = "product",
         indexes = @Index(name = "idx_inquiry_product", columnList = "productId,createdAt"))
 public class ProductInquiry {
-    @Id
-    public UUID id;
-    @Version
-    public long version;
+    /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
+    public static class ProductInquiryBuilder {
+        @Override
+        public String toString() {
+            return "ProductInquiryBuilder[REDACTED]";
+        }
+    }
+
+    @Id public UUID id;
+    @Version public long version;
 
     @Column(nullable = false, updatable = false)
     public UUID productId;
@@ -37,6 +46,8 @@ public class ProductInquiry {
 
     protected ProductInquiry() {}
 
+    // 기존 생성자를 거쳐 필드 초기화를 유지하며 JPA 기본 생성자도 보존합니다.
+    @Builder
     public ProductInquiry(UUID product, UUID buyer, String question, Instant now) {
         id = UUID.randomUUID();
         productId = product;

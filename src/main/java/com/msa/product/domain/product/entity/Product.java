@@ -1,8 +1,12 @@
 package com.msa.product.domain.product.entity;
 
-import com.msa.product.domain.product.ProductError;
-import com.msa.product.global.error.BusinessException;
+import com.msa.product.domain.product.exception.ProductErrorCode;
+import com.msa.product.domain.product.exception.ProductException;
+
 import jakarta.persistence.*;
+
+import lombok.Builder;
+
 import java.time.Instant;
 import java.util.*;
 
@@ -10,6 +14,14 @@ import java.util.*;
 @Entity
 @Table(name = "products", schema = "product")
 public class Product {
+    /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
+    public static class ProductBuilder {
+        @Override
+        public String toString() {
+            return "ProductBuilder[REDACTED]";
+        }
+    }
+
     public enum Status {
         DRAFT,
         IN_REVIEW,
@@ -17,14 +29,12 @@ public class Product {
         APPROVED
     }
 
-    @Id
-    public UUID id;
+    @Id public UUID id;
 
     @Column(nullable = false, updatable = false)
     public UUID sellerId;
 
-    @Version
-    public long version;
+    @Version public long version;
     // 옵션만 수정되어도 편집 버전이 증가하도록 상품 변경 식별자를 함께 갱신합니다.
     public UUID changeId;
 
@@ -126,6 +136,8 @@ public class Product {
 
     protected Product() {}
 
+    // 기존 생성자를 거쳐 필드 초기화를 유지하며 JPA 기본 생성자도 보존합니다.
+    @Builder
     public Product(UUID sellerId) {
         this.id = UUID.randomUUID();
         this.sellerId = sellerId;
@@ -136,13 +148,13 @@ public class Product {
     public void requireEditable(UUID actor) {
         requireOwner(actor);
         if (status != Status.DRAFT && status != Status.REJECTED) {
-            throw new BusinessException(ProductError.STATE);
+            throw new ProductException(ProductErrorCode.STATE);
         }
     }
 
     public void requireOwner(UUID actor) {
         if (!sellerId.equals(actor)) {
-            throw new BusinessException(ProductError.NOT_OWNER);
+            throw new ProductException(ProductErrorCode.NOT_OWNER);
         }
     }
 

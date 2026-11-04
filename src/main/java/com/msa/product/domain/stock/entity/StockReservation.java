@@ -2,6 +2,8 @@ package com.msa.product.domain.stock.entity;
 
 import jakarta.persistence.*;
 
+import lombok.Builder;
+
 import java.time.Instant;
 import java.util.*;
 
@@ -12,6 +14,14 @@ import java.util.*;
         schema = "product",
         indexes = @Index(name = "idx_reservation_expiry", columnList = "status,expiresAt"))
 public class StockReservation {
+    /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
+    public static class StockReservationBuilder {
+        @Override
+        public String toString() {
+            return "StockReservationBuilder[REDACTED]";
+        }
+    }
+
     public enum Status {
         HELD,
         PAYMENT_PROCESSING,
@@ -82,6 +92,8 @@ public class StockReservation {
 
     protected StockReservation() {}
 
+    // 기존 생성자를 거쳐 필드 초기화를 유지하며 JPA 기본 생성자도 보존합니다.
+    @Builder
     public StockReservation(
             UUID order,
             UUID product,

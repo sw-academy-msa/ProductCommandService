@@ -1,6 +1,9 @@
 package com.msa.product.domain.product.entity;
 
 import jakarta.persistence.*;
+
+import lombok.Builder;
+
 import java.util.*;
 
 /** 옵션명과 선택지의 순서를 보존해 조합 표시 문자열을 역파싱하지 않고 편집 화면을 복원합니다. */
@@ -10,8 +13,15 @@ import java.util.*;
         schema = "product",
         uniqueConstraints = @UniqueConstraint(columnNames = {"product_id", "name"}))
 public class ProductOptionDimension {
-    @Id
-    public UUID id;
+    /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
+    public static class ProductOptionDimensionBuilder {
+        @Override
+        public String toString() {
+            return "ProductOptionDimensionBuilder[REDACTED]";
+        }
+    }
+
+    @Id public UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
@@ -31,6 +41,8 @@ public class ProductOptionDimension {
 
     protected ProductOptionDimension() {}
 
+    // 기존 생성자를 거쳐 필드 초기화를 유지하며 JPA 기본 생성자도 보존합니다.
+    @Builder
     public ProductOptionDimension(Product product, String name, List<String> values) {
         id = UUID.randomUUID();
         this.product = product;
