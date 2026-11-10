@@ -57,8 +57,10 @@ public class Product {
     @Column(length = 200)
     public String brandOrStore;
 
-    // 단계 저장 상품은 구조화된 옵션을 사용합니다. 기존 전체 PUT이 구조를 유실시키지 못하게 구분합니다.
-    public int registrationFormatVersion;
+    // 기존 DB의 등록 형식 컬럼 쓰기 호환만 유지합니다. API 분기나 수정 허용 여부에는 사용하지 않습니다.
+    @Deprecated
+    private int registrationFormatVersion = 1;
+
     public Instant createdAt;
     public Instant updatedAt;
     public Instant addressesCapturedAt;
@@ -144,7 +146,7 @@ public class Product {
         this.status = Status.DRAFT;
     }
 
-    /** 승인된 원본의 수정은 재심사·기준 수량 정책이 확정되기 전까지 열지 않습니다. */
+    /** 승인된 원본은 직접 수정하지 않습니다. 판매 시작 전 변경은 별도 수정 심사 회차로 제출합니다. */
     public void requireEditable(UUID actor) {
         requireOwner(actor);
         if (status != Status.DRAFT && status != Status.REJECTED) {

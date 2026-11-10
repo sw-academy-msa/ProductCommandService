@@ -2,6 +2,7 @@ package com.msa.product.domain.product.command.dto.request;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
+
 import java.time.OffsetDateTime;
 import java.util.*;
 
@@ -55,7 +56,30 @@ public final class RegistrationRequests {
             @Positive Integer dispatchBusinessDays,
             @Positive Integer perAccountLimit,
             @Size(max = 4000) String shippingNotice,
-            @Size(max = 4000) String purchaseNotice) {}
+            @Size(max = 4000) String purchaseNotice,
+            UUID dispatchAddressId,
+            UUID returnAddressId) {
+        /** 기존 호출자는 기본 주소를 사용합니다. */
+        public PricingShipping(
+                Long expectedVersion,
+                Long price,
+                Long shippingFee,
+                Integer dispatchBusinessDays,
+                Integer perAccountLimit,
+                String shippingNotice,
+                String purchaseNotice) {
+            this(
+                    expectedVersion,
+                    price,
+                    shippingFee,
+                    dispatchBusinessDays,
+                    perAccountLimit,
+                    shippingNotice,
+                    purchaseNotice,
+                    null,
+                    null);
+        }
+    }
 
     /** 5단계 시작 시각만 받으며 종료 시각은 서버가 계산합니다. */
     public record Schedule(@NotNull Long expectedVersion, OffsetDateTime startsAt) {}

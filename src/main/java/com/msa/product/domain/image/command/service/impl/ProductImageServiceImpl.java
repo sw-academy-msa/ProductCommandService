@@ -49,7 +49,7 @@ public class ProductImageServiceImpl implements ProductImageService {
     }
 
     public ImageResponse.Upload issue(UUID seller, UUID product, ImageUploadRequest request) {
-        editable(seller, product);
+        uploadable(seller, product);
         if (!policy.ready()) {
             throw new ImageException(ImageErrorCode.POLICY);
         }
@@ -59,7 +59,7 @@ public class ProductImageServiceImpl implements ProductImageService {
                 || request.sizeBytes() > policy.maxBytes()) {
             throw new ImageException(ImageErrorCode.INVALID);
         }
-        if (images.countByProductIdAndAttachedTrue(product) >= 10) {
+        if (!approved(product) && images.countByProductIdAndAttachedTrue(product) >= 10) {
             throw new ImageException(ImageErrorCode.STATE);
         }
         var image =
@@ -98,16 +98,17 @@ public class ProductImageServiceImpl implements ProductImageService {
 
     /** S3 호출에는 10초 상한이 있습니다. 같은 상품의 이미지 변경·심사 제출과 연결 검증을 직렬화합니다. */
     public ImageResponse complete(UUID seller, UUID product, UUID id) {
-        editable(seller, product);
+        uploadable(seller, product);
         ProductImage image = owned(seller, product, id);
-        if (image.attached) {
+        if (image.attached
+                || (Boolean.TRUE.equals(image.revisionCandidate) && image.objectKey != null)) {
             return ImageResponse.from(image);
         }
         if (!policy.ready()) {
             throw new ImageException(ImageErrorCode.POLICY);
         }
         if (!clock.instant().isBefore(image.expiresAt)
-                || images.countByProductIdAndAttachedTrue(product) >= 10) {
+                || (!approved(product) && images.countByProductIdAndAttachedTrue(product) >= 10)) {
             throw new ImageException(ImageErrorCode.STATE);
         }
         try {
@@ -147,7 +148,8 @@ public class ProductImageServiceImpl implements ProductImageService {
             var current = images.findByProductIdAndAttachedTrueOrderByPositionAsc(product);
             image.position = current.size();
             image.representative = current.isEmpty();
-            image.attached = true;
+            image.revisionCandidate = approved(product);
+            image.attached = !Boolean.TRUE.equals(image.revisionCandidate);
             return ImageResponse.from(image);
         } catch (S3Exception ex) {
             // 객체 미존재·ETag 경합과 S3 장애를 구분하고 원문 주소·서명은 응답/로그에 노출하지 않습니다.
@@ -195,7 +197,13 @@ public class ProductImageServiceImpl implements ProductImageService {
                         .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         p.requireOwner(seller);
         var image = owned(seller, product, id);
-        if (!image.attached) {
+        if ((!image.attached
+                        && !Boolean.TRUE.equals(image.revisionCandidate)
+                        && !Boolean.TRUE.equals(image.revisionReferenced))
+                || image.objectKey == null
+                || (!image.attached
+                        && image.storageCleaned
+                        && !Boolean.TRUE.equals(image.revisionReferenced))) {
             throw new ImageException(ImageErrorCode.NOT_FOUND);
         }
         if (!policy.ready()) {
@@ -231,6 +239,25 @@ public class ProductImageServiceImpl implements ProductImageService {
         // 즉시 S3를 삭제하지 않습니다. DB 커밋 실패 시 참조가 깨지지 않도록 후속 정리 대상으로 남깁니다.
     }
 
+    /** 승인 상품의 새 업로드는 판매 시작 전 후보로만 저장합니다. 기존 공개 이미지는 수정하지 않습니다. */
+    private void uploadable(UUID seller, UUID product) {
+        var p =
+                products.lock(product)
+                        .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
+        p.requireOwner(seller);
+        if (p.status == com.msa.product.domain.product.entity.Product.Status.APPROVED) {
+            if (p.startsAt == null || !clock.instant().isBefore(p.startsAt))
+                throw new ImageException(ImageErrorCode.STATE);
+        } else {
+            p.requireEditable(seller);
+        }
+    }
+
+    private boolean approved(UUID id) {
+        return products.findById(id).orElseThrow().status
+                == com.msa.product.domain.product.entity.Product.Status.APPROVED;
+    }
+
     private void editable(UUID seller, UUID product) {
         products.lock(product)
                 .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND))
@@ -248,6 +275,10 @@ public class ProductImageServiceImpl implements ProductImageService {
         products.lock(productId).orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         var image =
                 images.findById(id).orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
+        if (Boolean.TRUE.equals(image.revisionReferenced)) {
+            // 제출·심사 이력의 증거 객체는 미사용 이미지 만료 대상으로 취급하지 않습니다.
+            return;
+        }
         if (image.storageCleaned
                 || image.expiresAt.isAfter(clock.instant().minus(Duration.ofHours(24)))) {
             return;

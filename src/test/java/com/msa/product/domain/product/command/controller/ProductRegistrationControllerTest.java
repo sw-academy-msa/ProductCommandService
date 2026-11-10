@@ -228,7 +228,7 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
     }
 
     @Test
-    void staleVersionOtherOwnerAndLegacyOverwriteAreRejected() throws Exception {
+    void staleVersionAndOtherOwnerAreRejected() throws Exception {
         long old = version();
         step("basic-info", basic());
         mvc.perform(
@@ -246,12 +246,6 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
                                                 + version()
                                                 + ",\"attributes\":[]}"))
                 .andExpect(status().isForbidden());
-        mvc.perform(
-                        put("/api/v1/seller/products/" + product)
-                                .with(seller(seller))
-                                .contentType("application/json")
-                                .content("{\"expectedVersion\":" + version() + ",\"options\":[]}"))
-                .andExpect(status().isConflict());
     }
 
     @Test

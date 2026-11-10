@@ -1,5 +1,9 @@
 package com.msa.product.domain.image.command.service.impl;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import com.msa.product.domain.image.command.dto.request.*;
 import com.msa.product.domain.image.entity.ProductImage;
 import com.msa.product.domain.image.repository.ProductImageRepository;
@@ -7,16 +11,16 @@ import com.msa.product.domain.product.entity.Product;
 import com.msa.product.domain.product.repository.ProductRepository;
 import com.msa.product.global.config.storage.ImageStorageProperties;
 import com.msa.product.global.error.BusinessException;
+
 import org.junit.jupiter.api.*;
+
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+
 import java.time.*;
 import java.util.*;
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
 
 /** 이미지 소유권·실제 파일 서명·불변 키 복사를 검증합니다. 실제 S3 호환성 검증을 대체하지 않습니다. */
 class ProductImageServiceImplTest {
@@ -53,8 +57,47 @@ class ProductImageServiceImplTest {
         p = new Product(UUID.randomUUID());
         image = new ProductImage(p.id, p.sellerId, "image/png", 16, now.plusSeconds(300));
         when(products.lock(p.id)).thenReturn(Optional.of(p));
+        when(products.findById(p.id)).thenReturn(Optional.of(p));
         when(images.findById(image.id)).thenReturn(Optional.of(image));
         when(images.findByProductIdAndAttachedTrueOrderByPositionAsc(p.id)).thenReturn(List.of());
+    }
+
+    @Test
+    void approvedProductCompletionOnlyCreatesCandidateAndCannotChangePublishedImages() {
+        p.status = Product.Status.APPROVED;
+        p.startsAt = now.plusSeconds(3600);
+        when(images.countByProductIdAndAttachedTrue(p.id)).thenReturn(10L);
+        when(s3.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(
+                        HeadObjectResponse.builder()
+                                .contentLength(16L)
+                                .contentType("image/png")
+                                .eTag("v1")
+                                .build());
+        when(s3.getObjectAsBytes(any(GetObjectRequest.class)))
+                .thenReturn(
+                        ResponseBytes.fromByteArray(
+                                GetObjectResponse.builder().build(),
+                                new byte[] {(byte) 137, 80, 78, 71, 13, 10, 26, 10}));
+        service.complete(p.sellerId, p.id, image.id);
+        assertThat(image.attached).isFalse();
+        assertThat(image.revisionCandidate).isTrue();
+        service.complete(p.sellerId, p.id, image.id);
+        verify(s3, times(1)).copyObject(any(CopyObjectRequest.class));
+        assertThatThrownBy(() -> service.detach(p.sellerId, p.id, image.id))
+                .isInstanceOf(BusinessException.class);
+        p.startsAt = now;
+        assertThatThrownBy(() -> service.complete(p.sellerId, p.id, image.id))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void cleanupNeverDeletesImageReferencedByRevisionHistory() {
+        image.revisionReferenced = true;
+        image.expiresAt = now.minusSeconds(172800);
+        when(images.findProductId(image.id)).thenReturn(Optional.of(p.id));
+        service.cleanup(image.id);
+        verifyNoInteractions(s3);
     }
 
     @Test

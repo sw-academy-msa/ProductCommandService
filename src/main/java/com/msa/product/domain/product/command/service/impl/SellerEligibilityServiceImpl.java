@@ -56,7 +56,9 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
                             .uri("/api/v1/sellers/me")
                             .headers(h -> h.setBearerAuth(token))
                             .retrieve()
-                            .body(new org.springframework.core.ParameterizedTypeReference<AccountResponse<SellerShippingResponse>>() {});
+                            .body(
+                                    new org.springframework.core.ParameterizedTypeReference<
+                                            AccountResponse<SellerShippingResponse>>() {});
             // Account 일반 API는 공통 응답의 data에 업무 결과를 담습니다.
             var result = response != null && response.success() ? response.data() : null;
             if (result == null
@@ -79,6 +81,56 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
         }
     }
 
+    /** Account가 JWT 소유권을 검증한 DISPATCH/RETURN 주소만 복사합니다. 다른 서비스 DB는 읽지 않습니다. */
+    public SellerShippingResponse shipping(
+            String token, UUID sellerId, UUID dispatchId, UUID returnId) {
+        var defaults = shipping(token, sellerId);
+        return SellerShippingResponse.builder()
+                .accountId(sellerId)
+                .dispatchAddress(
+                        dispatchId == null
+                                ? defaults.dispatchAddress()
+                                : selected(token, "DISPATCH", dispatchId))
+                .returnAddress(
+                        returnId == null
+                                ? defaults.returnAddress()
+                                : selected(token, "RETURN", returnId))
+                .build();
+    }
+
+    private SellerShippingResponse.Location selected(String token, String type, UUID id) {
+        try {
+            var envelope =
+                    client.get()
+                            .uri("/api/v1/sellers/me/address-book/{type}/{id}", type, id)
+                            .headers(h -> h.setBearerAuth(token))
+                            .retrieve()
+                            .body(
+                                    new org.springframework.core.ParameterizedTypeReference<
+                                            AccountResponse<AddressEntry>>() {});
+            var entry = envelope != null && envelope.success() ? envelope.data() : null;
+            if (entry == null
+                    || !id.equals(entry.id())
+                    || !type.equals(entry.type())
+                    || !valid(entry.address())) {
+                throw new ProductException(ProductErrorCode.INVALID);
+            }
+            return entry.address();
+        } catch (HttpClientErrorException ex) {
+            if (ex.getStatusCode().value() == 401)
+                throw new ProductException(ProductErrorCode.AUTHENTICATION_REQUIRED);
+            if (ex.getStatusCode().value() == 403)
+                throw new ProductException(ProductErrorCode.ACCESS_DENIED);
+            throw new ProductException(ProductErrorCode.INVALID);
+        } catch (RestClientException ex) {
+            throw new ProductException(ProductErrorCode.POLICY);
+        }
+    }
+
+    /** Account 본인 주소 응답 경계 전용 DTO입니다. 연락처는 수집하지 않습니다. */
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    private record AddressEntry(UUID id, String type, SellerShippingResponse.Location address) {}
+
     private boolean valid(SellerShippingResponse.Location l) {
         return l != null
                 && l.postalCode() != null
@@ -89,6 +141,7 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
                 && l.roadAddress().length() <= 500
                 && (l.detailAddress() == null || l.detailAddress().length() <= 500);
     }
+
     /** Account 응답 경계 전용 DTO이며 서비스 간 Java 모델을 공유하지 않습니다. */
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
     private record AccountResponse<T>(boolean success, T data) {}

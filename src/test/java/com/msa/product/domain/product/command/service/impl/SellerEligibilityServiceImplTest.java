@@ -54,6 +54,41 @@ class SellerEligibilityServiceImplTest {
     }
 
     @Test
+    void selectsOnlyAccountVerifiedAddressOfExpectedTypeAndId() {
+        var seller = java.util.UUID.randomUUID();
+        var id = java.util.UUID.randomUUID();
+        response =
+                """
+{"success":true,"data":{"accountId":"%s","dispatchAddress":{"postalCode":"00000","roadAddress":"합성 기본 출고지"},"returnAddress":{"postalCode":"00000","roadAddress":"합성 기본 반품지"}}}
+"""
+                        .formatted(seller);
+        server.createContext(
+                "/api/v1/sellers/me/address-book/DISPATCH/" + id,
+                exchange -> {
+                    byte[] bytes =
+                            ("{\"success\":true,\"data\":{\"id\":\""
+                                            + id
+                                            + "\",\"type\":\"DISPATCH\",\"address\":{\"postalCode\":\"00001\",\"roadAddress\":\"합성"
+                                            + " 선택 출고지\"}}}")
+                                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, bytes.length);
+                    exchange.getResponseBody().write(bytes);
+                    exchange.close();
+                });
+        var selected = service.shipping("fixture-only", seller, id, null);
+        assertThat(selected.dispatchAddress().postalCode()).isEqualTo("00001");
+        assertThat(selected.returnAddress().roadAddress()).isEqualTo("합성 기본 반품지");
+        assertThatThrownBy(
+                        () ->
+                                service.shipping(
+                                        "fixture-only", seller, java.util.UUID.randomUUID(), null))
+                .isInstanceOf(ProductException.class);
+        assertThatThrownBy(() -> service.shipping("fixture-only", seller, null, id))
+                .isInstanceOf(ProductException.class);
+    }
+
+    @Test
     void forwardsBearerToExistingSellerApi() {
         assertThatCode(() -> service.requireApproved("fixture-only")).doesNotThrowAnyException();
     }

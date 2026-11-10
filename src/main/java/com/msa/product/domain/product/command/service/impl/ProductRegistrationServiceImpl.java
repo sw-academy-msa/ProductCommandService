@@ -23,12 +23,17 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
     private final ProductRepository products;
     private final Clock clock;
     private final ProjectionOutboxService outbox;
+    private final com.msa.product.domain.analysis.service.ProductAnalysisService analyses;
 
     public ProductRegistrationServiceImpl(
-            ProductRepository products, Clock clock, ProjectionOutboxService outbox) {
+            ProductRepository products,
+            Clock clock,
+            ProjectionOutboxService outbox,
+            com.msa.product.domain.analysis.service.ProductAnalysisService analyses) {
         this.products = products;
         this.clock = clock;
         this.outbox = outbox;
+        this.analyses = analyses;
     }
 
     public ProductResponse basic(UUID seller, UUID id, Basic r) {
@@ -244,7 +249,6 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
         var p = locked(seller, id, version);
         p.requireEditable(seller);
         p.status = Product.Status.DRAFT;
-        p.registrationFormatVersion = 1;
         return p;
     }
 
@@ -321,6 +325,8 @@ public class ProductRegistrationServiceImpl implements ProductRegistrationServic
         if (!r.confirmed()) {
             fail(ProductErrorCode.INVALID);
         }
+        // AI 질문은 실제 발급 결과와 현재 상품 입력에 연결된 것만 허용합니다.
+        analyses.verifySuggestion(f.product, r.suggestionId(), r.question());
         f.question = r.question().trim();
         f.answer = r.answer().trim();
         f.suggestionId = r.suggestionId();

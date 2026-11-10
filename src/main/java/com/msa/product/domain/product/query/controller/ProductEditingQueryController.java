@@ -1,11 +1,12 @@
 package com.msa.product.domain.product.query.controller;
 
+import com.msa.product.domain.category.service.CategoryService;
 import com.msa.product.domain.product.command.dto.response.ProductResponse;
 import com.msa.product.domain.product.entity.Product;
 import com.msa.product.domain.product.query.dto.response.ProductManagementResponse;
+import com.msa.product.domain.product.query.dto.response.ProductSalesSummaryResponse;
 import com.msa.product.domain.product.query.dto.response.RegistrationMetadataResponse;
 import com.msa.product.domain.product.query.service.ProductEditingQueryService;
-import com.msa.product.global.config.product.ProductPolicyProperties;
 import com.msa.product.global.response.ApiResponse;
 import com.msa.product.global.response.SuccessCode;
 
@@ -22,10 +23,10 @@ import java.util.UUID;
 @PreAuthorize("hasRole('SELLER')")
 public class ProductEditingQueryController {
     private final ProductEditingQueryService service;
-    private final ProductPolicyProperties policy;
+    private final CategoryService policy;
 
     public ProductEditingQueryController(
-            ProductEditingQueryService service, ProductPolicyProperties policy) {
+            ProductEditingQueryService service, CategoryService policy) {
         this.service = service;
         this.policy = policy;
     }
@@ -34,7 +35,10 @@ public class ProductEditingQueryController {
     @GetMapping("/registration-metadata")
     public ApiResponse<RegistrationMetadataResponse> categories() {
         RegistrationMetadataResponse response =
-                RegistrationMetadataResponse.builder().categories(policy.categories()).build();
+                RegistrationMetadataResponse.builder()
+                        .categories(policy.names())
+                        .categoryCriteria(policy.catalog())
+                        .build();
         return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 
@@ -45,14 +49,31 @@ public class ProductEditingQueryController {
         return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 
+    /** 본인 원본 재고의 합계이며 주문 매출과 수수료를 계산하지 않습니다. 월 경계는 KST입니다. */
+    @GetMapping("/sales-summary")
+    public ApiResponse<ProductSalesSummaryResponse> summary(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false)
+                    @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM")
+                    java.time.YearMonth month) {
+        ProductSalesSummaryResponse response =
+                service.summary(UUID.fromString(jwt.getSubject()), month);
+        return ApiResponse.onSuccess(response, SuccessCode.OK);
+    }
+
     @GetMapping
     public ApiResponse<ProductManagementResponse> list(
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(required = false) Product.Status status,
+            @RequestParam(required = false)
+                    @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM")
+                    java.time.YearMonth month,
+            @RequestParam(required = false) ProductEditingQueryService.SaleState saleState,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         ProductManagementResponse response =
-                service.list(UUID.fromString(jwt.getSubject()), status, page, size);
+                service.managed(
+                        UUID.fromString(jwt.getSubject()), status, month, saleState, page, size);
         return ApiResponse.onSuccess(response, SuccessCode.OK);
     }
 }
