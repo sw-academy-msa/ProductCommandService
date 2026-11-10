@@ -132,6 +132,7 @@ class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
                         product,
                         seller,
                         request.fingerprint(),
+                        Outcome.RECOMMENDED,
                         "CLOTHING",
                         List.of(question));
         service.complete(result);
@@ -186,10 +187,76 @@ class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
                                                 product,
                                                 UUID.randomUUID(),
                                                 request.fingerprint(),
+                                                Outcome.RECOMMENDED,
                                                 "CLOTHING",
                                                 List.of())))
                 .isInstanceOf(ProductException.class);
         assertThat(analyses.findById(request.requestId()).orElseThrow().resultPayload).isNull();
+    }
+
+    /** 추천이 없는 결과는 이유를 그대로 저장하고 상품 분류·상태는 바꾸지 않습니다. */
+    @Test
+    void notApplicableResultKeepsOutcomeWithoutChangingProduct() {
+        var request = service.request(seller, product, version());
+        service.complete(
+                new Completed(
+                        request.requestId(),
+                        product,
+                        seller,
+                        request.fingerprint(),
+                        Outcome.NOT_APPLICABLE,
+                        null,
+                        List.of()));
+        var saved = analyses.findById(request.requestId()).orElseThrow().resultPayload;
+        assertThat(saved).contains("\"outcome\":\"NOT_APPLICABLE\"");
+        assertThat(products.findById(product).orElseThrow().status.name()).isEqualTo("DRAFT");
+    }
+
+    /** 결과 구분과 추천 카테고리가 어긋난 결과는 저장하지 않습니다. */
+    @Test
+    void outcomeInconsistentWithCategoryDoesNotPersist() {
+        var request = service.request(seller, product, version());
+        assertThatThrownBy(
+                        () ->
+                                service.complete(
+                                        new Completed(
+                                                request.requestId(),
+                                                product,
+                                                seller,
+                                                request.fingerprint(),
+                                                Outcome.RECOMMENDED,
+                                                null,
+                                                List.of())))
+                .isInstanceOf(ProductException.class);
+        assertThatThrownBy(
+                        () ->
+                                service.complete(
+                                        new Completed(
+                                                request.requestId(),
+                                                product,
+                                                seller,
+                                                request.fingerprint(),
+                                                Outcome.UNCLEAR,
+                                                "CLOTHING",
+                                                List.of())))
+                .isInstanceOf(ProductException.class);
+        assertThat(analyses.findById(request.requestId()).orElseThrow().resultPayload).isNull();
+    }
+
+    /** 결과 구분 필드 추가 전 v1 메시지도 기존처럼 처리합니다. */
+    @Test
+    void legacyResultWithoutOutcomeIsAccepted() {
+        var request = service.request(seller, product, version());
+        service.complete(
+                new Completed(
+                        request.requestId(),
+                        product,
+                        seller,
+                        request.fingerprint(),
+                        null,
+                        null,
+                        List.of()));
+        assertThat(analyses.findById(request.requestId()).orElseThrow().resultPayload).isNotNull();
     }
 
     @Test

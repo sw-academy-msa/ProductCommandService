@@ -45,12 +45,24 @@ public final class AiMessages {
     @Builder
     public record Question(UUID suggestionId, String checkCode, String question, String reason) {}
 
+    /** AI 결과 구분입니다. AI 계약과 같은 이름을 사용하며 모델 호출 실패는 결과로 오지 않습니다. */
+    public enum Outcome {
+        // 허용 카테고리 하나를 추천했습니다.
+        RECOMMENDED,
+        // 이미지가 허용된 상품 카테고리에 해당하지 않습니다.
+        NOT_APPLICABLE,
+        // 이미지가 불명확해 카테고리를 판단할 수 없습니다.
+        UNCLEAR
+    }
+
+    // outcome이 없는 결과는 구분 필드 추가 전 v1 메시지이며 recommendedCategory로만 판단합니다.
     @Builder
     public record Completed(
             UUID requestId,
             UUID productId,
             UUID sellerId,
             String fingerprint,
+            Outcome outcome,
             String recommendedCategory,
             List<Question> questions) {}
 }

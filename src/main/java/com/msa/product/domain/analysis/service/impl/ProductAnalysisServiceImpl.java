@@ -115,6 +115,10 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                 || !a.sellerId.equals(result.sellerId())
                 || !a.fingerprint.equals(result.fingerprint())) fail();
         var request = json.readValue(a.requestPayload, Requested.class);
+        // 결과 구분이 있으면 추천일 때만 카테고리가 있어야 합니다. 구분이 없는 이전 v1 메시지는 그대로 받습니다.
+        if (result.outcome() != null
+                && (result.outcome() == Outcome.RECOMMENDED)
+                        == (result.recommendedCategory() == null)) fail();
         // 판단 불가도 정상 결과이며 상품의 분류·승인 상태는 그대로 유지합니다.
         if (result.recommendedCategory() == null) {
             if (result.questions() == null || !result.questions().isEmpty()) fail();
