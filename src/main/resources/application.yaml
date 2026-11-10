@@ -1,7 +1,14 @@
 # 공통 설정은 Product 소유 스키마와 공개키 검증 계약만 정의합니다.
 spring:
-  config:
-    import: optional:file:./.env[.properties]
+  flyway:
+    locations: classpath:db/category
+    default-schema: product
+    schemas: product
+    create-schemas: false
+    table: category_schema_history
+    baseline-version: 0
+    baseline-on-migrate: false
+    clean-disabled: true
   application:
     name: product-command-service
   profiles:
@@ -21,6 +28,13 @@ spring:
           time_zone: UTC
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+    listener:
+      ack-mode: record
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
@@ -39,6 +53,8 @@ server:
   # 외부 전달 헤더를 인증 사용자나 소유권의 근거로 사용하지 않습니다.
   forward-headers-strategy: none
 product:
+  ai:
+    consumer-enabled: ${PRODUCT_AI_CONSUMER_ENABLED:false}
   outbox:
     # 저장은 항상 수행하고 발행만 명시적으로 활성화합니다. 장애 중에도 미발행 이벤트를 보존합니다.
     publisher-enabled: ${PRODUCT_OUTBOX_PUBLISHER_ENABLED:false}
@@ -47,9 +63,6 @@ product:
     order-subject: ${ORDER_SERVICE_SUBJECT:}
   seller-account:
     base-url: ${ACCOUNT_INTERNAL_BASE_URL:http://localhost:8080}
-  policy:
-    # 최종 카테고리 목록은 별도 확정합니다. 비어 있으면 심사 제출이 차단됩니다.
-    categories: ${PRODUCT_CATEGORIES:}
   images:
     enabled: ${PRODUCT_IMAGES_ENABLED:false}
     bucket: ${PRODUCT_IMAGES_BUCKET:}
@@ -79,10 +92,16 @@ eureka:
     health-check-url-path: /actuator/health
     status-page-url-path: /actuator/health
 management:
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       show-details: never
@@ -93,3 +112,10 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+# 업무 JWT와 분리된 읽기 전용 수집 토큰입니다. 빈 값이면 메트릭 접근을 거부합니다.
+monitoring:
+  scrape-token: ${MONITORING_SCRAPE_TOKEN:}
+
+  # Outbox 집계 스케줄은 명시 활성화하며 테스트/미설정 환경에서 DB를 주기 조회하지 않습니다.
+  outbox-enabled: ${MONITORING_OUTBOX_ENABLED:false}
