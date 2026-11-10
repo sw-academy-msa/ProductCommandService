@@ -27,14 +27,21 @@ public class StockCommandServiceImpl implements StockCommandService {
     private final StockReservationRepository reservations;
     private final ActiveStockReservationRepository active;
     private final Clock clock;
+    private final com.msa.product.domain.withdrawal.service.WithdrawalGateService withdrawal;
+    private final com.msa.product.domain.withdrawal.repository.WithdrawalStateRepository
+            withdrawalState;
     private final ProjectionOutboxService outbox;
 
     public StockCommandServiceImpl(
+            com.msa.product.domain.withdrawal.service.WithdrawalGateService withdrawal,
+            com.msa.product.domain.withdrawal.repository.WithdrawalStateRepository withdrawalState,
             ProductRepository products,
             StockReservationRepository reservations,
             ActiveStockReservationRepository active,
             Clock clock,
             ProjectionOutboxService outbox) {
+        this.withdrawal = withdrawal;
+        this.withdrawalState = withdrawalState;
         this.products = products;
         this.reservations = reservations;
         this.active = active;
@@ -44,6 +51,9 @@ public class StockCommandServiceImpl implements StockCommandService {
 
     /** 단일 상품 잠금 후 모든 옵션을 검증·반영합니다. DB 잠금을 5분 유지하지 않습니다. */
     public StockReservationResponse reserve(ReserveStockRequest request) {
+        // sellerId만 먼저 읽어 엔티티의 오래된 상태를 캐시에 넣지 않고 계정 잠금을 선행합니다.
+        UUID seller = withdrawalState.seller(request.productId()).orElse(null);
+        withdrawal.requireOpen(request.buyerId(), seller);
         Product p = lockProduct(request.productId());
         Map<UUID, Integer> items = new TreeMap<>();
         if (request.items() == null || request.items().isEmpty()) {
