@@ -28,7 +28,12 @@ import java.util.concurrent.*;
 
 /** 실제 Kafka 중단·복구와 DB 발행 완료 기록, 복제본 발행 경합을 검증합니다. */
 @SpringBootTest(
-        properties = {"product.outbox.publisher-enabled=true", "product.outbox.poll-ms=3600000"})
+        properties = {
+            "product.outbox.publisher-enabled=true",
+            "product.outbox.poll-ms=3600000",
+            // 직접 발행과 자동 스케줄의 첫 실행 경합을 피합니다. 자동 경로는 별도 테스트에서 검증합니다.
+            "product.outbox.initial-delay-ms=3600000"
+        })
 @ActiveProfiles("test")
 @Import(ProductDatabaseTestSupport.Time.class)
 class OutboxPublisherImplTest extends ProductDatabaseTestSupport {
@@ -136,7 +141,7 @@ class OutboxPublisherImplTest extends ProductDatabaseTestSupport {
         assertThat(
                         jdbc.queryForObject(
                                 "select published_at is null from product.outbox_events where id ="
-                                    + " ?",
+                                        + " ?",
                                 Boolean.class,
                                 id))
                 .isTrue();
