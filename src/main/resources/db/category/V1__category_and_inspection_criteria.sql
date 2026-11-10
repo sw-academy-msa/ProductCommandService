@@ -1,0 +1,23 @@
+-- 상품 분류와 AI 점검 기준만 관리하며 기존 원본 데이터는 변경하지 않습니다.
+CREATE TABLE product.product_categories (code varchar(255) PRIMARY KEY, name varchar(255) NOT NULL UNIQUE, display_order integer NOT NULL, active boolean NOT NULL);
+CREATE TABLE product.category_checks (code varchar(255) PRIMARY KEY, category_code varchar(255) NOT NULL REFERENCES product.product_categories(code), question varchar(2000) NOT NULL, display_order integer NOT NULL);
+INSERT INTO product.product_categories (code,name,display_order,active) VALUES ('CLOTHING','의류',0,true);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('CLOTHING_MEASUREMENTS','CLOTHING','실측 사이즈와 측정 기준을 알려주세요.',0);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('CLOTHING_MATERIAL','CLOTHING','소재와 혼용률을 알려주세요.',1);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('CLOTHING_CARE','CLOTHING','세탁 및 관리 방법을 알려주세요.',2);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('CLOTHING_COMPONENTS','CLOTHING','구매 시 제공되는 구성품을 알려주세요.',3);
+INSERT INTO product.product_categories (code,name,display_order,active) VALUES ('FASHION_ACCESSORIES','패션잡화',1,true);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('FASHION_ACCESSORIES_DIMENSIONS','FASHION_ACCESSORIES','제품의 크기와 치수를 알려주세요.',0);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('FASHION_ACCESSORIES_MATERIAL','FASHION_ACCESSORIES','제품 소재를 알려주세요.',1);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('FASHION_ACCESSORIES_COMPONENTS','FASHION_ACCESSORIES','사진에 있는 구성품이 모두 포함되는지 알려주세요.',2);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('FASHION_ACCESSORIES_CARE','FASHION_ACCESSORIES','사용 및 관리 시 유의사항을 알려주세요.',3);
+INSERT INTO product.product_categories (code,name,display_order,active) VALUES ('STATIONERY','문구',2,true);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('STATIONERY_DIMENSIONS','STATIONERY','제품의 크기와 규격을 알려주세요.',0);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('STATIONERY_MATERIAL','STATIONERY','재질과 주요 사양을 알려주세요.',1);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('STATIONERY_COMPONENTS','STATIONERY','한 번 구매할 때 제공되는 구성과 개수를 알려주세요.',2);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('STATIONERY_USE','STATIONERY','사용 방법과 사용 시 유의사항을 알려주세요.',3);
+INSERT INTO product.product_categories (code,name,display_order,active) VALUES ('HOUSEHOLD','일반 생활잡화',3,true);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('HOUSEHOLD_DIMENSIONS','HOUSEHOLD','제품의 크기와 규격을 알려주세요.',0);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('HOUSEHOLD_MATERIAL','HOUSEHOLD','제품 소재를 알려주세요.',1);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('HOUSEHOLD_COMPONENTS','HOUSEHOLD','사진에 있는 구성품이 모두 포함되는지 알려주세요.',2);
+INSERT INTO product.category_checks (code,category_code,question,display_order) VALUES ('HOUSEHOLD_USE','HOUSEHOLD','사용 방법과 관리 시 유의사항을 알려주세요.',3);
