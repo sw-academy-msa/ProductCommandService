@@ -16,6 +16,10 @@ spring:
     hibernate:
       # 운영 마이그레이션을 대신하지 않는 개발 전용 정책입니다.
       ddl-auto: update
+product:
+  seller-account:
+    # 로컬 프로필에서만 Account 판매자 API를 평문 http로 호출합니다.
+    scheme: http
 springdoc:
   api-docs:
     enabled: true

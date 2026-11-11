@@ -7,11 +7,10 @@ import com.msa.product.domain.product.exception.ProductException;
 import com.msa.product.global.config.security.SellerAccountProperties;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.*;
 
-import java.time.Duration;
 import java.util.UUID;
 
 /** 실제 존재하는 GET /api/v1/sellers/me가 최신 승인 자격을 확인합니다. 실패 시 변경을 허용하지 않습니다. */
@@ -19,19 +18,25 @@ import java.util.UUID;
 @EnableConfigurationProperties(SellerAccountProperties.class)
 public class SellerEligibilityServiceImpl implements SellerEligibilityService {
     private final RestClient client;
+    private final String account;
 
-    public SellerEligibilityServiceImpl(SellerAccountProperties properties) {
-        var factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(2));
-        factory.setReadTimeout(Duration.ofSeconds(3));
-        client = RestClient.builder().baseUrl(properties.baseUrl()).requestFactory(factory).build();
+    public SellerEligibilityServiceImpl(
+            SellerAccountProperties properties,
+            @Qualifier("loadBalancedRestClient") RestClient client) {
+        this.client = client;
+        // 서비스 ID 주소입니다. 인스턴스 선택·상태 확인·연결 실패 재시도는 LoadBalancer가 담당하고 고정 주소로 우회하지 않습니다.
+        account = properties.scheme() + "://" + properties.serviceId();
+    }
+
+    private String account() {
+        return account;
     }
 
     public void requireApproved(String token) {
         // JWT 서명 확인을 위임하는 호출이 아닙니다. Product 검증 완료 후 업무 자격만 확인합니다.
         try {
             client.get()
-                    .uri("/api/v1/sellers/me")
+                    .uri(account() + "/api/v1/sellers/me")
                     .headers(h -> h.setBearerAuth(token))
                     .retrieve()
                     .toBodilessEntity();
@@ -43,7 +48,8 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
                 throw new ProductException(ProductErrorCode.ACCESS_DENIED);
             }
             throw new ProductException(ProductErrorCode.POLICY);
-        } catch (RestClientException ex) {
+        } catch (RestClientException | IllegalStateException ex) {
+            // IllegalStateException은 LoadBalancer가 고를 Account 인스턴스가 없다는 뜻이며 자격 확인 불가로 변경을 막습니다.
             throw new ProductException(ProductErrorCode.POLICY);
         }
     }
@@ -53,7 +59,7 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
         try {
             var response =
                     client.get()
-                            .uri("/api/v1/sellers/me")
+                            .uri(account() + "/api/v1/sellers/me")
                             .headers(h -> h.setBearerAuth(token))
                             .retrieve()
                             .body(
@@ -76,7 +82,8 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
                 throw new ProductException(ProductErrorCode.ACCESS_DENIED);
             }
             throw new ProductException(ProductErrorCode.POLICY);
-        } catch (RestClientException ex) {
+        } catch (RestClientException | IllegalStateException ex) {
+            // IllegalStateException은 LoadBalancer가 고를 Account 인스턴스가 없다는 뜻이며 자격 확인 불가로 변경을 막습니다.
             throw new ProductException(ProductErrorCode.POLICY);
         }
     }
@@ -102,7 +109,10 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
         try {
             var envelope =
                     client.get()
-                            .uri("/api/v1/sellers/me/address-book/{type}/{id}", type, id)
+                            .uri(
+                                    account() + "/api/v1/sellers/me/address-book/{type}/{id}",
+                                    type,
+                                    id)
                             .headers(h -> h.setBearerAuth(token))
                             .retrieve()
                             .body(
@@ -122,7 +132,8 @@ public class SellerEligibilityServiceImpl implements SellerEligibilityService {
             if (ex.getStatusCode().value() == 403)
                 throw new ProductException(ProductErrorCode.ACCESS_DENIED);
             throw new ProductException(ProductErrorCode.INVALID);
-        } catch (RestClientException ex) {
+        } catch (RestClientException | IllegalStateException ex) {
+            // IllegalStateException은 LoadBalancer가 고를 Account 인스턴스가 없다는 뜻이며 자격 확인 불가로 변경을 막습니다.
             throw new ProductException(ProductErrorCode.POLICY);
         }
     }
