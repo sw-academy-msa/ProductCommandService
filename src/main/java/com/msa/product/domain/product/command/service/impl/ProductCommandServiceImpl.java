@@ -1,5 +1,6 @@
 package com.msa.product.domain.product.command.service.impl;
 
+import com.msa.product.domain.category.service.CategoryService;
 import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.command.dto.request.*;
@@ -9,119 +10,66 @@ import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.exception.ProductErrorCode;
 import com.msa.product.domain.product.exception.ProductException;
 import com.msa.product.domain.product.repository.ProductRepository;
-import com.msa.product.global.config.product.ProductPolicyProperties;
 
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.net.URI;
 import java.time.*;
 import java.util.*;
 
 /** 상품·옵션 변경과 심사를 한 로컬 트랜잭션에서 처리합니다. 외부 API를 호출하며 DB 잠금을 유지하지 않습니다. */
 @Service
 @Transactional
-@EnableConfigurationProperties(ProductPolicyProperties.class)
 public class ProductCommandServiceImpl implements ProductCommandService {
+    private final com.msa.product.domain.notification.service.BusinessNoticeService notices;
     private final ProductRepository products;
     private final ProductImageRepository images;
-    private final ProductPolicyProperties policy;
+    private final CategoryService policy;
     private final Clock clock;
+    private final com.msa.product.domain.withdrawal.service.WithdrawalGateService withdrawal;
     private final ProjectionOutboxService outbox;
+    private final com.msa.product.domain.product.command.service.ProductPublicationService
+            publication;
 
     public ProductCommandServiceImpl(
+            com.msa.product.domain.notification.service.BusinessNoticeService notices,
+            com.msa.product.domain.withdrawal.service.WithdrawalGateService withdrawal,
             ProductRepository products,
             ProductImageRepository images,
-            ProductPolicyProperties policy,
+            CategoryService policy,
             Clock clock,
-            ProjectionOutboxService outbox) {
+            ProjectionOutboxService outbox,
+            com.msa.product.domain.product.command.service.ProductPublicationService publication) {
+        this.notices = notices;
+        this.withdrawal = withdrawal;
         this.products = products;
         this.images = images;
         this.policy = policy;
         this.clock = clock;
         this.outbox = outbox;
+        this.publication = publication;
     }
 
     public ProductResponse create(UUID seller) {
+        withdrawal.requireOpen(seller);
         var p = Product.builder().sellerId(seller).build();
         p.createdAt = clock.instant();
         p.updatedAt = p.createdAt;
         return ProductResponse.from(products.saveAndFlush(p));
     }
 
-    /** 초안은 전체 교체합니다. 옵션 변경이 실패하면 상품 변경도 롤백됩니다. */
-    public ProductResponse save(UUID seller, UUID id, SaveProductRequest r) {
-        Product p = locked(id);
-        p.requireEditable(seller);
-        version(p, r.expectedVersion());
-        if (p.registrationFormatVersion != 0) {
-            throw new ProductException(ProductErrorCode.STATE);
-        }
-        p.changeId = UUID.randomUUID();
-        p.updatedAt = clock.instant();
-        if (r.options() == null
-                || r.options().stream()
-                        .anyMatch(
-                                o ->
-                                        o == null
-                                                || o.label() == null
-                                                || o.label().isBlank()
-                                                || o.quantity() <= 0)
-                || r.options().stream().map(o -> o.label().trim()).distinct().count()
-                        != r.options().size()
-                || r.options().stream().mapToLong(SaveProductRequest.Option::quantity).sum()
-                        > Integer.MAX_VALUE) {
-            throw new ProductException(ProductErrorCode.INVALID);
-        }
-        if (r.sourceUrl() != null && !r.sourceUrl().isBlank()) {
-            validateUrl(r.sourceUrl());
-        }
-        if (r.startsAt() != null && !r.startsAt().toInstant().isAfter(clock.instant())) {
-            throw new ProductException(ProductErrorCode.INVALID);
-        }
-        p.name = r.name();
-        p.description = r.description();
-        p.sourceUrl = r.sourceUrl();
-        p.category = r.category();
-        p.price = r.price();
-        p.shippingFee = r.shippingFee();
-        p.dispatchBusinessDays = r.dispatchBusinessDays();
-        p.perAccountLimit = r.perAccountLimit();
-        p.shippingNotice = r.shippingNotice();
-        p.purchaseNotice = r.purchaseNotice();
-        p.disposalReason = r.disposalReason();
-        p.startsAt = r.startsAt() == null ? null : r.startsAt().toInstant();
-        p.endsAt = p.startsAt == null ? null : p.startsAt.plus(Duration.ofHours(3));
-        // 기존 조합을 먼저 삭제하여 같은 라벨 재저장 시 유일 제약과 충돌하지 않게 합니다.
-        p.options.clear();
-        products.flush();
-        r.options()
-                .forEach(
-                        o ->
-                                p.options.add(
-                                        ProductOption.builder()
-                                                .product(p)
-                                                .label(o.label().trim())
-                                                .quantity(o.quantity())
-                                                .build()));
-        p.status = Product.Status.DRAFT;
-        products.flush();
-        outbox.productChanged(p);
-        return ProductResponse.from(p);
-    }
-
     public ProductResponse submit(UUID seller, UUID id, long expectedVersion) {
+        withdrawal.requireOpen(seller);
         Product p = locked(id);
         p.requireEditable(seller);
         version(p, expectedVersion);
-        if (policy.categories().isEmpty()) {
+        if (policy.names().isEmpty()) {
             throw new ProductException(ProductErrorCode.POLICY);
         }
         if (blank(p.name)
                 || blank(p.description)
                 || blank(p.sourceUrl)
-                || !policy.categories().contains(p.category)
+                || !policy.allowed(p.category)
                 || p.price == null
                 || p.price <= 0
                 || p.shippingFee == null
@@ -169,6 +117,17 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         p.updatedAt = clock.instant();
         products.flush();
         outbox.productChanged(p);
+        // 최초 승인만 신규 상품 알림의 기준이며 조회 스냅샷 갱신과 별개 계약으로 발행합니다.
+        if (r.approved()) publication.published(p);
+        notices.enqueue(
+                p.sellerId,
+                r.approved() ? "PRODUCT_APPROVED" : "PRODUCT_REJECTED",
+                p.id,
+                p.version,
+                "SELLER_PRODUCT",
+                p.id,
+                null,
+                null);
         return ProductResponse.from(p);
     }
 
@@ -185,19 +144,5 @@ public class ProductCommandServiceImpl implements ProductCommandService {
 
     private boolean blank(String value) {
         return value == null || value.isBlank();
-    }
-
-    private void validateUrl(String value) {
-        try {
-            URI uri = URI.create(value);
-            if (!("https".equalsIgnoreCase(uri.getScheme())
-                            || "http".equalsIgnoreCase(uri.getScheme()))
-                    || uri.getHost() == null
-                    || uri.getUserInfo() != null) {
-                throw new IllegalArgumentException();
-            }
-        } catch (IllegalArgumentException ex) {
-            throw new ProductException(ProductErrorCode.INVALID);
-        }
     }
 }

@@ -6,10 +6,18 @@ spring:
   config:
     # 테스트는 개발자의 .env를 읽지 않도록 공통 import를 대체합니다.
     import: optional:classpath:/test-overrides.properties
+  flyway:
+    baseline-on-migrate: true
   jpa:
     hibernate:
       ddl-auto: none
+  # HTTP fixture에는 /actuator/health가 없으므로 상태 확인 대신 기본 인스턴스 목록을 씁니다.
+  cloud:
+    loadbalancer:
+      configurations: default
 product:
+  seller-account:
+    scheme: http
   auth:
     issuer: https://account.test
     audience: stockdrop-api

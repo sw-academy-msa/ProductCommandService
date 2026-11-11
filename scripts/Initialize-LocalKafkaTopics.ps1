@@ -4,7 +4,7 @@ $compose = Join-Path $PSScriptRoot '..\..\ProductQueryService\compose.kafka.yaml
 if (-not (Test-Path -LiteralPath $compose)) {
     throw 'ProductQueryService compose.kafka.yaml을 찾을 수 없습니다.'
 }
-foreach ($topic in @('stockdrop.product.public.v1', 'stockdrop.product.inquiries.v1', 'stockdrop.product.public.v1.DLT', 'stockdrop.product.inquiries.v1.DLT')) {
+foreach ($topic in @('stockdrop.product.public.v1', 'stockdrop.product.inquiries.v1', 'stockdrop.product.public.v1.DLT', 'stockdrop.product.inquiries.v1.DLT', 'stockdrop.product.published.v1')) {
     docker compose -f $compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic $topic --partitions 2 --replication-factor 1 --config max.message.bytes=4194304
     if ($LASTEXITCODE -ne 0) {
         throw "로컬 토픽 생성 실패: $topic"

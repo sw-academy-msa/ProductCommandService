@@ -100,6 +100,8 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
                                         }))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(count()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from product.outbox_events", Long.class))
+                .isZero();
         assertThat(products.findById(productId).orElseThrow().status)
                 .isEqualTo(Product.Status.IN_REVIEW);
         assertThat(
@@ -112,6 +114,26 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
     void rejectedProductIsNeverPublished() {
         commands.review(UUID.randomUUID(), productId, new ReviewProductRequest(0L, false, "보완 필요"));
         assertThat(count()).isZero();
+        // 공개 상품 이벤트는 계속 없고 판매자에게만 전달할 일반 알림 한 건을 보관합니다.
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from product.outbox_events where topic <>"
+                                    + " 'stockdrop.notifications.product.v1'",
+                                Long.class))
+                .isZero();
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from product.outbox_events where topic ="
+                                    + " 'stockdrop.notifications.product.v1'",
+                                Long.class))
+                .isEqualTo(1L);
+        assertThat(
+                        jdbc.queryForObject(
+                                "select payload from product.outbox_events where topic ="
+                                    + " 'stockdrop.notifications.product.v1'",
+                                String.class))
+                .contains("PRODUCT_REJECTED")
+                .doesNotContain("보완 필요");
     }
 
     @Test
@@ -262,13 +284,18 @@ class ProjectionOutboxServiceImplTest extends ProductDatabaseTestSupport {
     }
 
     private long count() {
-        return jdbc.queryForObject("select count(*) from product.outbox_events", Long.class);
+        // 최초 공개 알림 토픽을 제외하고 이 테스트의 Query 스냅샷·문의 계약만 셉니다.
+        return jdbc.queryForObject(
+                "select count(*) from product.outbox_events where topic in"
+                    + " ('stockdrop.product.public.v1', 'stockdrop.product.inquiries.v1')",
+                Long.class);
     }
 
     private String latest() {
         return jdbc.queryForObject(
-                "select payload from product.outbox_events order by"
-                        + " (payload::jsonb->>'aggregateVersion')::bigint desc limit 1",
+                "select payload from product.outbox_events where"
+                    + " topic='stockdrop.product.public.v1' order by"
+                    + " (payload::jsonb->>'aggregateVersion')::bigint desc limit 1",
                 String.class);
     }
 }

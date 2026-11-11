@@ -42,6 +42,9 @@ public class ProductImage {
     public int position;
     public boolean representative;
     public boolean storageCleaned;
+    // 수정 심사용 후보는 공개 이미지와 분리하며 회차에 참조된 객체는 이력 보존 대상으로 둡니다.
+    public Boolean revisionCandidate = false;
+    public Boolean revisionReferenced = false;
 
     protected ProductImage() {}
 

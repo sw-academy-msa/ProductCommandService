@@ -25,7 +25,10 @@ public class OutboxSchedulingConfig {
         return scheduler;
     }
 
-    @Scheduled(fixedDelayString = "${product.outbox.poll-ms:1000}", scheduler = "outboxScheduler")
+    @Scheduled(
+            fixedDelayString = "${product.outbox.poll-ms:1000}",
+            initialDelayString = "${product.outbox.initial-delay-ms:0}",
+            scheduler = "outboxScheduler")
     public void publish() {
         for (int i = 0; i < 20 && publisher.publishNext(); i++) {
             // 한 번의 실행에 무한히 발행하지 않아 종료와 모니터링 기회를 보장합니다.

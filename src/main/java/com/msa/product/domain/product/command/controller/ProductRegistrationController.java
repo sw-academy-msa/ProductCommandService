@@ -60,7 +60,14 @@ public class ProductRegistrationController {
             @PathVariable UUID id,
             @Valid @RequestBody PricingShipping r) {
         // Account와의 네트워크 통신은 상품 잠금과 DB 트랜잭션 밖에서 완료합니다.
-        var snapshot = account.shipping(jwt.getTokenValue(), seller(jwt));
+        var snapshot =
+                r.dispatchAddressId() == null && r.returnAddressId() == null
+                        ? account.shipping(jwt.getTokenValue(), seller(jwt))
+                        : account.shipping(
+                                jwt.getTokenValue(),
+                                seller(jwt),
+                                r.dispatchAddressId(),
+                                r.returnAddressId());
         ProductResponse response = service.pricingShipping(seller(jwt), id, r, snapshot);
         return ApiResponse.onSuccess(response, SuccessCode.OK);
     }

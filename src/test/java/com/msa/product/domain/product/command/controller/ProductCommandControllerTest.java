@@ -37,6 +37,7 @@ import java.util.*;
 @ActiveProfiles("test")
 @Import(ProductDatabaseTestSupport.Time.class)
 class ProductCommandControllerTest extends ProductDatabaseTestSupport {
+    @Autowired com.msa.product.domain.outbox.repository.OutboxEventRepository publicationOutbox;
     @Autowired MockMvc mvc;
     @Autowired ProductRepository products;
     @Autowired ProductImageRepository images;
@@ -50,6 +51,21 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     void setup() {
         clock.set(Instant.parse("2030-01-01T00:00:00Z"));
         reset(eligibility);
+        when(eligibility.shipping(anyString(), any(UUID.class)))
+                .thenAnswer(
+                        call ->
+                                com.msa.product.domain.product.command.dto.response
+                                        .SellerShippingResponse.builder()
+                                        .accountId(call.getArgument(1))
+                                        .dispatchAddress(
+                                                new com.msa.product.domain.product.command.dto
+                                                        .response.SellerShippingResponse.Location(
+                                                        "00000", "합성 출고 도로", ""))
+                                        .returnAddress(
+                                                new com.msa.product.domain.product.command.dto
+                                                        .response.SellerShippingResponse.Location(
+                                                        "00000", "합성 반품 도로", ""))
+                                        .build());
     }
 
     org.springframework.test.web.servlet.request.RequestPostProcessor seller(UUID id) {
@@ -57,14 +73,42 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                 .authorities(new SimpleGrantedAuthority("ROLE_SELLER"));
     }
 
-    String body(long version) {
+    /** 실제 등록 경로를 사용해 테스트도 폐기한 전체 PUT에 의존하지 않습니다. */
+    org.springframework.test.web.servlet.ResultActions step(UUID id, String stage, String fields)
+            throws Exception {
+        long version = products.findById(id).orElseThrow().version;
+        return mvc.perform(
+                put("/api/v1/seller/products/" + id + "/registration/" + stage)
+                        .with(seller(seller))
+                        .contentType("application/json")
+                        .content("{\"expectedVersion\":" + version + "," + fields + "}"));
+    }
+
+    String options() {
         return """
-{"expectedVersion":%d,"name":"테스트 노트","description":"새 상품입니다","sourceUrl":"https://example.com/item",
- "category":"문구","price":1000,"shippingFee":0,"dispatchBusinessDays":2,"perAccountLimit":3,
- "disposalReason":"남은 재고","startsAt":"2030-01-02T09:00:00+09:00",
- "options":[{"label":"기본","quantity":5},{"label":"큰 규격","quantity":2}]}
-"""
-                .formatted(version);
+               "dimensions":[{"name":"규격","values":["기본","큰 규격"]}],
+               "variants":[{"selections":{"규격":"기본"},"initialQuantity":5},
+                           {"selections":{"규격":"큰 규격"},"initialQuantity":2}]
+               """;
+    }
+
+    void prepareDraft(UUID id) throws Exception {
+        step(
+                        id,
+                        "basic-info",
+                        "\"name\":\"테스트 노트\",\"description\":\"새"
+                            + " 상품\",\"category\":\"문구\",\"sourceUrl\":\"https://example.com/item\"")
+                .andExpect(status().isOk());
+        step(id, "details", "\"attributes\":[],\"disposalReason\":\"남은 재고\"")
+                .andExpect(status().isOk());
+        step(id, "options", options()).andExpect(status().isOk());
+        step(
+                        id,
+                        "pricing-shipping",
+                        "\"price\":1000,\"shippingFee\":0,\"dispatchBusinessDays\":2,\"perAccountLimit\":3")
+                .andExpect(status().isOk());
+        step(id, "schedule", "\"startsAt\":\"2030-01-02T09:00:00+09:00\"")
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -90,75 +134,48 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     void sellerCannotEditOthersProduct() throws Exception {
         var p = commands.create(seller);
         mvc.perform(
-                        put("/api/v1/seller/products/" + p.id())
+                        put("/api/v1/seller/products/" + p.id() + "/registration/basic-info")
                                 .with(seller(UUID.randomUUID()))
                                 .contentType("application/json")
-                                .content(body(p.version())))
+                                .content("{\"expectedVersion\":0,\"name\":\"타인 수정\"}"))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void savesOptionsAtomicallyAndRejectsInvalidPriceQuantityAndTime() throws Exception {
         var p = commands.create(seller);
-        mvc.perform(
-                        put("/api/v1/seller/products/" + p.id())
-                                .with(seller(seller))
-                                .contentType("application/json")
-                                .content(body(p.version())))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.options.length()").value(2))
-                .andExpect(jsonPath("$.data.endsAt").value("2030-01-02T03:00:00Z"));
-        var saved = products.findById(p.id()).orElseThrow();
-        for (String invalid :
-                List.of(
-                        body(saved.version).replace("\"price\":1000", "\"price\":-1"),
-                        body(saved.version).replace("\"quantity\":2", "\"quantity\":0"),
-                        body(saved.version).replace("2030-01-02", "2029-01-02"))) {
-            mvc.perform(
-                            put("/api/v1/seller/products/" + p.id())
-                                    .with(seller(seller))
-                                    .contentType("application/json")
-                                    .content(invalid))
-                    .andExpect(status().isBadRequest());
-        }
+        prepareDraft(p.id());
+        step(p.id(), "pricing-shipping", "\"price\":-1").andExpect(status().isBadRequest());
+        step(p.id(), "options", options().replace("\"initialQuantity\":2", "\"initialQuantity\":0"))
+                .andExpect(status().isBadRequest());
+        step(p.id(), "schedule", "\"startsAt\":\"2029-01-02T09:00:00+09:00\"")
+                .andExpect(status().isBadRequest());
         assertThat(tx.<Integer>execute(s -> products.findById(p.id()).orElseThrow().options.size()))
                 .isEqualTo(2);
+        assertThat(products.findById(p.id()).orElseThrow().endsAt)
+                .isEqualTo(Instant.parse("2030-01-02T03:00:00Z"));
     }
 
     @Test
     void duplicateOptionRollsBackAndStaleVersionConflicts() throws Exception {
         var p = commands.create(seller);
-        mvc.perform(
-                        put("/api/v1/seller/products/" + p.id())
-                                .with(seller(seller))
-                                .contentType("application/json")
-                                .content(body(p.version()).replace("큰 규격", "기본")))
-                .andExpect(status().isBadRequest());
+        step(p.id(), "options", options().replace("큰 규격", "기본")).andExpect(status().isBadRequest());
         assertThat(tx.<Integer>execute(s -> products.findById(p.id()).orElseThrow().options.size()))
                 .isZero();
+        long before = products.findById(p.id()).orElseThrow().version;
+        step(p.id(), "options", options()).andExpect(status().isOk());
         mvc.perform(
-                        put("/api/v1/seller/products/" + p.id())
+                        put("/api/v1/seller/products/" + p.id() + "/registration/options")
                                 .with(seller(seller))
                                 .contentType("application/json")
-                                .content(body(p.version())))
-                .andExpect(status().isOk());
-        mvc.perform(
-                        put("/api/v1/seller/products/" + p.id())
-                                .with(seller(seller))
-                                .contentType("application/json")
-                                .content(body(p.version())))
+                                .content("{\"expectedVersion\":" + before + "," + options() + "}"))
                 .andExpect(status().isConflict());
     }
 
     @Test
     void requiresImageThenReviewsBeforeApprovalAndLocksApprovedProduct() throws Exception {
         var p = commands.create(seller);
-        mvc.perform(
-                        put("/api/v1/seller/products/" + p.id())
-                                .with(seller(seller))
-                                .contentType("application/json")
-                                .content(body(p.version())))
-                .andExpect(status().isOk());
+        prepareDraft(p.id());
         long version = products.findById(p.id()).orElseThrow().version;
         mvc.perform(
                         post("/api/v1/seller/products/" + p.id() + "/review-submissions")
@@ -208,12 +225,27 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                                 .content("{\"expectedVersion\":" + version + ",\"approved\":true}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("APPROVED"));
+        // 심사 제출·반려와 달리 최초 승인에서만 별도 공개 이벤트를 같은 트랜잭션에 저장합니다.
+        var publishedId =
+                UUID.nameUUIDFromBytes(
+                        ("product-published-v1:" + p.id())
+                                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var event = publicationOutbox.findById(publishedId).orElseThrow();
+        assertThat(event.topic).isEqualTo("stockdrop.product.published.v1");
+        assertThat(event.payload).contains("STATIONERY", "문구");
+        step(p.id(), "basic-info", "\"name\":\"승인 후 직접 수정\"").andExpect(status().isConflict());
+    }
+
+    /** 경로의 GET은 유지하되 폐기한 전체 PUT은 더 이상 처리하지 않습니다. */
+    @Test
+    void removedWholeProductPutReturnsMethodNotAllowed() throws Exception {
+        var p = commands.create(seller);
         mvc.perform(
                         put("/api/v1/seller/products/" + p.id())
                                 .with(seller(seller))
                                 .contentType("application/json")
-                                .content(body(products.findById(p.id()).orElseThrow().version)))
-                .andExpect(status().isConflict());
+                                .content("{}"))
+                .andExpect(status().isMethodNotAllowed());
     }
 
     @Test

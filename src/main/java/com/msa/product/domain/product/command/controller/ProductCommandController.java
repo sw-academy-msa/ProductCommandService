@@ -34,19 +34,6 @@ public class ProductCommandController {
         return ApiResponse.onSuccess(response, SuccessCode.CREATED);
     }
 
-    @PutMapping("/{id}")
-    @Deprecated
-    @io.swagger.v3.oas.annotations.Operation(
-            deprecated = true,
-            description = "기존 초안 호환용 전체 교체입니다. 단계별 저장을 시작한 상품에는 사용할 수 없습니다.")
-    public ApiResponse<ProductResponse> save(
-            @AuthenticationPrincipal Jwt jwt,
-            @PathVariable UUID id,
-            @Valid @RequestBody SaveProductRequest r) {
-        ProductResponse response = service.save(UUID.fromString(jwt.getSubject()), id, r);
-        return ApiResponse.onSuccess(response, SuccessCode.OK);
-    }
-
     @PostMapping("/{id}/review-submissions")
     public ApiResponse<ProductResponse> submit(
             @AuthenticationPrincipal Jwt jwt,

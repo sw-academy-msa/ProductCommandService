@@ -6,11 +6,12 @@ Java 21 / Spring Boot 4.1.1 / Spring Cloud 2025.1.4 / Gradle 9.8.2.
 AccountService의 초기 구성과 스타일을 참고한 MVC 서비스입니다.
 상품 초안·옵션 저장, 심사 제출·승인·반려, 이미지 업로드 권한·검증·연결과 재고 확보·확정·해제 API를 구현했습니다.
 판매자 등록은 단계별 PUT으로 저장하며 브랜드·자유 상세 정보·구조화된 옵션·Account 배송 주소 스냅샷·판매자 확인 FAQ를 보존합니다.
-본인 상품 관리 목록·운영자 심사 목록·상품 문의·판매자 답변도 제공합니다. AI 생성은 아직 연결하지 않았습니다.
+본인 상품 관리 목록·운영자 심사 목록·상품 문의·판매자 답변도 제공합니다. AI 분석 요청·결과는 별도 AIService와 Kafka로 연결하며 실제 모델 호출은 별도로 활성화합니다.
+승인 상품은 판매 시작 전 별도 수정 심사본을 제출하며 기존 승인본의 공개·판매를 유지합니다. 상품별 배송 주소 선택과 KST 판매 시작 월별 관리·재고 집계는 [수정 심사와 판매 관리 API](contracts/product-revisions.md)를 참고합니다.
 상품은 검사 후 승인하며 승인 전에는 재고를 확보할 수 없습니다. 승인·재고·FAQ·문의 변경은 Outbox와 Kafka를 통해 별도 Product Query에 전달할 수 있습니다. 두 앱의 발행/소비 활성화가 필요합니다.
 재고 확보는 5분이며, Order의 결제 진행 전이와 실제 승인 시각에 따라 확정·해제합니다.
 API 목록·설정·내부 인증 계약·검증 범위는 [상품·재고 API 안내](docs/product-command-api.md)를 확인합니다.
-[상품 등록 7단계 프런트 연동 안내](docs/product-registration.md)에 단계별 요청과 기존 전체 PUT 전환 방법을 정리했습니다.
+[상품 등록 7단계 프런트 연동 안내](docs/product-registration.md)에 단계별 요청 방법을 정리했습니다.
 
 ## 로컬 실행
 
@@ -31,7 +32,7 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot'
 - Swagger(local): http://localhost:8081/swagger-ui.html
 - 실제 S3 없이 실행할 수 있으며 이미지 연동은 기본 비활성입니다. 로컬 업로드는 `compose.images.yaml`과 `.env.example`의 이미지 설정을 사용합니다.
 - 이미지 형식은 JPEG·PNG·WebP, 장당 상한 10MiB, 상품당 최대 10장입니다. 장당 상한은 설정으로 변경할 수 있습니다.
-- 최종 카테고리는 `PRODUCT_CATEGORIES`로 주입합니다. 목록 미설정 시 심사 제출을 차단합니다.
+- 카테고리 4개(의류, 패션잡화, 문구, 일반 생활잡화)와 점검 기준 16개는 Flyway가 관리합니다. `PRODUCT_CATEGORIES`는 더 이상 사용하지 않습니다.
 - 판매자 업무는 기존 Account `/api/v1/sellers/me`로 최신 자격을 확인합니다. Account 장애 시 상품 업무를 차단합니다.
 - 내부 재고 API는 별도 scope와 `ORDER_SERVICE_SUBJECT`가 필요합니다. Account/Order의 서비스 토큰 발급 계약은 아직 구현되지 않았으므로 실제 Order HTTP 연동 완료를 의미하지 않습니다.
 - 초기화 스크립트는 기존 Product 비밀번호와 나머지 `.env` 설정을 유지하고 DB 주소·포트만 전환합니다. 기존 DB·역할을 삭제하거나 비밀번호를 재설정하지 않습니다.
@@ -48,7 +49,9 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot'
 - [Outbox 저장·Kafka 발행·Query 이벤트 계약과 로컬 실행](contracts/product-projection-v1.md)
 - [Order 내부 확보 응답 스냅샷 확장과 책임 경계](contracts/order-stock-snapshot.md)
 - 상품 승인·재고·FAQ·문의 변경은 업무와 같은 트랜잭션으로 Outbox에 저장합니다. Kafka 발행은 PRODUCT_OUTBOX_PUBLISHER_ENABLED=true로 별도 활성화합니다.
-- 개발 스키마는 ddl-auto=update로 반영합니다. 운영 스키마 관리 방식은 배포 준비 시 정하며 운영 validate 설정은 유지합니다.
+- 기존 업무 스키마는 개발 ddl-auto=update, 운영 validate를 유지합니다. 새 카테고리·점검 기준은 `db/category`와 `category_schema_history` 전용 Flyway 이력으로 관리합니다. 기존 운영 스키마의 최초 baseline 0은 배포 시 확인하고 실행해야 합니다.
+- [상품 등록 AI 요청·질문·FAQ 연동](contracts/product-analysis-v1.md)
+- [GA 관심도와 최초 공개 상품 알림 후보](contracts/ga-category-recommendations-v1.md), 최초 운영자 승인 시 `stockdrop.product.published.v1`을 동일 트랜잭션의 Outbox에 보관합니다. 수정 승인·FAQ·재고 변경은 신규 상품 알림을 만들지 않습니다.
 
 - [조사 결과·의존성과 패키지·모델 초안·미정 정책](docs/initial-design.md)
 - [Figma 기반 화면 요구사항·서비스 경계·구현 계획](docs/figma-product-command-plan.md)
@@ -74,3 +77,15 @@ Lombok은 Spring Boot가 관리하는 버전을 compileOnly·annotationProcessor
 
 AccountService와 같이 상품·재고·이미지·문의의 exception 패키지에 도메인별 Exception과 ErrorCode를 둡니다. 각 예외는 공통 BusinessException을 상속하고 기존 GlobalExceptionHandler가 HTTP 응답으로 변환합니다. 서비스와 엔티티는 해당 도메인 예외를 사용합니다.
 내부 예외 타입을 구분하되 기존 PRODUCT_* 코드·HTTP 상태·메시지는 유지합니다. 특히 Order가 사용하는 PRODUCT_EXPIRED 계약은 바꾸지 않습니다. Account 인증·인가 실패도 기존 COMMON_UNAUTHORIZED·COMMON_FORBIDDEN 응답으로 유지합니다.
+
+## 회원탈퇴 연동
+
+[원본 확인, 신규 거래 차단과 장애 회수 계약](contracts/account-withdrawal-v1.md)을 확인합니다.
+완료된 판매 이력은 탈퇴 차단 사유가 아닙니다. 진행 거래와 미확정 결제/보상만 확인하며 수수료는 후속 구현 범위입니다.
+
+## 일반 업무 알림
+
+[심사 결과, 보완 요청과 기한, 주문 확정과 배송 알림 계약](contracts/business-notifications-v1.md)을 확인합니다.
+상태 변경과 Outbox는 함께 커밋하며 기존 구매 Saga와 결제 Kafka 계약은 유지합니다.
+
+카테고리 확장 목록과 호환 범위는 [카테고리 확장 계약](contracts/category-expansion-v2.md)을 확인합니다.

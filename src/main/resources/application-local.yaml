@@ -1,5 +1,11 @@
 # 일반 DB(5433)와 분리된 Command PostgreSQL에 Product 전용 계정으로 접속합니다.
 spring:
+  config:
+    # 로컬 비밀 설정은 로컬에서만 읽고 test/prod에는 전파하지 않습니다.
+    import: optional:file:./.env[.properties]
+  flyway:
+    # 기존 개발 스키마에서는 카테고리 전용 이력의 기준점만 자동 생성합니다.
+    baseline-on-migrate: true
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5434/product_command}
     username: ${DB_USERNAME:product}
@@ -10,6 +16,10 @@ spring:
     hibernate:
       # 운영 마이그레이션을 대신하지 않는 개발 전용 정책입니다.
       ddl-auto: update
+product:
+  seller-account:
+    # 로컬 프로필에서만 Account 판매자 API를 평문 http로 호출합니다.
+    scheme: http
 springdoc:
   api-docs:
     enabled: true
