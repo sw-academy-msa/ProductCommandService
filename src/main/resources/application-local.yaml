@@ -4,8 +4,10 @@ spring:
     # 로컬 비밀 설정은 로컬에서만 읽고 test/prod에는 전파하지 않습니다.
     import: optional:file:./.env[.properties]
   flyway:
-    # 기존 개발 스키마에서는 카테고리 전용 이력의 기준점만 자동 생성합니다.
+    # Flyway 통합 전 update와 분류 전용 이력으로 V1~V3 내용이 이미 있는 개발 DB는 실행하지 않고 V3까지 적용된 것으로 기록합니다.
+    # 빈 DB에서는 V1부터 실행합니다. 이전 category_schema_history 테이블은 더 이상 읽지 않습니다.
     baseline-on-migrate: true
+    baseline-version: 3
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5434/product_command}
     username: ${DB_USERNAME:product}
