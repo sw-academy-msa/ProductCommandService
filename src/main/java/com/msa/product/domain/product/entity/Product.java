@@ -12,7 +12,11 @@ import java.util.*;
 
 /** product 스키마의 상품 원본입니다. 외부 판매자 ID는 값으로만 저장하며 Account FK를 만들지 않습니다. */
 @Entity
-@Table(name = "products", schema = "product")
+@Table(
+        name = "products",
+        schema = "product",
+        // 판매자 상품 목록·판매 요약·탈퇴 확인이 판매자 ID로 조회합니다.
+        indexes = @Index(name = "idx_product_seller", columnList = "sellerId"))
 public class Product {
     /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
     public static class ProductBuilder {
