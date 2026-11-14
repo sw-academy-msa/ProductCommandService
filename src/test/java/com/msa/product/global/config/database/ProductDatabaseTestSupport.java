@@ -38,7 +38,7 @@ public abstract class ProductDatabaseTestSupport {
             return arguments -> {
                 var resource =
                         new org.springframework.core.io.ClassPathResource(
-                                "db/category/V1__category_and_inspection_criteria.sql");
+                                "db/migration/V2__category_and_inspection_criteria.sql");
                 String sql = resource.getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
                 // 기준 데이터를 복제하지 않고 실제 Flyway 원본의 INSERT 부분을 Hibernate 생성 후 적용합니다.
                 var inserts =
@@ -47,10 +47,10 @@ public abstract class ProductDatabaseTestSupport {
                                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(inserts)
                         .execute(dataSource);
-                // 테스트가 V1의 4개 분류에만 머물지 않도록 실제 추가 마이그레이션도 같은 순서로 적용합니다.
+                // 테스트가 V2의 4개 분류에만 머물지 않도록 실제 추가 마이그레이션도 같은 순서로 적용합니다.
                 new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
                                 new org.springframework.core.io.ClassPathResource(
-                                        "db/category/V2__expand_predefined_product_categories.sql"))
+                                        "db/migration/V3__expand_predefined_product_categories.sql"))
                         .execute(dataSource);
             };
         }

@@ -49,7 +49,7 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot'
 - [Outbox 저장·Kafka 발행·Query 이벤트 계약과 로컬 실행](contracts/product-projection-v1.md)
 - [Order 내부 확보 응답 스냅샷 확장과 책임 경계](contracts/order-stock-snapshot.md)
 - 상품 승인·재고·FAQ·문의 변경은 업무와 같은 트랜잭션으로 Outbox에 저장합니다. Kafka 발행은 PRODUCT_OUTBOX_PUBLISHER_ENABLED=true로 별도 활성화합니다.
-- 기존 업무 스키마는 개발 ddl-auto=update, 운영 validate를 유지합니다. 새 카테고리·점검 기준은 `db/category`와 `category_schema_history` 전용 Flyway 이력으로 관리합니다. 기존 운영 스키마의 최초 baseline 0은 배포 시 확인하고 실행해야 합니다.
+- 테이블은 `db/migration`의 Flyway SQL로 관리합니다. V1 업무 테이블, V2 카테고리·점검 기준, V3 카테고리 확장 순서이며 운영은 빈 DB에서 V1부터 실행한 뒤 ddl-auto=validate로 검사합니다. 개발은 ddl-auto=update를 유지하고, Flyway 통합 전 테이블이 있는 개발 DB는 baseline 3으로 기록만 합니다. 이전 `category_schema_history`는 더 이상 읽지 않습니다.
 - [상품 등록 AI 요청·질문·FAQ 연동](contracts/product-analysis-v1.md)
 - [GA 관심도와 최초 공개 상품 알림 후보](contracts/ga-category-recommendations-v1.md), 최초 운영자 승인 시 `stockdrop.product.published.v1`을 동일 트랜잭션의 Outbox에 보관합니다. 수정 승인·FAQ·재고 변경은 신규 상품 알림을 만들지 않습니다.
 
