@@ -12,7 +12,11 @@ import java.util.*;
 @Table(
         name = "stock_reservations",
         schema = "product",
-        indexes = @Index(name = "idx_reservation_expiry", columnList = "status,expiresAt"))
+        indexes = {
+            @Index(name = "idx_reservation_expiry", columnList = "status,expiresAt"),
+            // 구매 확보 때마다 같은 구매자의 기존 확보를 찾으므로 전체 조회를 피합니다.
+            @Index(name = "idx_reservation_product_buyer", columnList = "productId,buyerId")
+        })
 public class StockReservation {
     /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
     public static class StockReservationBuilder {

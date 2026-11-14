@@ -9,7 +9,14 @@ import java.util.UUID;
 
 /** 서버가 발급한 객체 키만 상품에 연결합니다. 업로드 임시 키와 공개용 불변 키를 분리합니다. */
 @Entity
-@Table(name = "product_images", schema = "product")
+@Table(
+        name = "product_images",
+        schema = "product",
+        // 상품별 연결 이미지 목록과 개수를 순서대로 조회합니다.
+        indexes =
+                @Index(
+                        name = "idx_image_product_attached",
+                        columnList = "productId,attached,position"))
 public class ProductImage {
     /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
     public static class ProductImageBuilder {
