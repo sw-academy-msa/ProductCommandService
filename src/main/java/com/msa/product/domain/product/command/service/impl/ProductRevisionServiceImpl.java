@@ -1,6 +1,5 @@
 package com.msa.product.domain.product.command.service.impl;
 
-import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.domain.outbox.service.ProjectionOutboxService;
 import com.msa.product.domain.product.command.dto.request.*;
 import com.msa.product.domain.product.command.dto.response.*;
@@ -18,14 +17,13 @@ import tools.jackson.databind.json.JsonMapper;
 import java.time.*;
 import java.util.*;
 
-/** 모든 쓰기는 원본 상품 잠금을 먼저 사용합니다. 재고·가격·옵션을 복사하거나 되돌리지 않습니다. */
+/** 모든 쓰기는 원본 상품 잠금을 먼저 사용합니다. 가격은 판매 시작 전 승인본에만 반영하며 재고·옵션·이미지는 바꾸지 않습니다. */
 @Service
 @Transactional
 public class ProductRevisionServiceImpl implements ProductRevisionService {
     private final com.msa.product.domain.notification.service.BusinessNoticeService notices;
     private final ProductRepository products;
     private final ProductRevisionRepository revisions;
-    private final ProductImageRepository images;
     private final ProjectionOutboxService outbox;
     private final JsonMapper json;
     private final Clock clock;
@@ -34,14 +32,12 @@ public class ProductRevisionServiceImpl implements ProductRevisionService {
             com.msa.product.domain.notification.service.BusinessNoticeService notices,
             ProductRepository products,
             ProductRevisionRepository revisions,
-            ProductImageRepository images,
             ProjectionOutboxService outbox,
             JsonMapper json,
             Clock clock) {
         this.notices = notices;
         this.products = products;
         this.revisions = revisions;
-        this.images = images;
         this.outbox = outbox;
         this.json = json;
         this.clock = clock;
@@ -59,7 +55,6 @@ public class ProductRevisionServiceImpl implements ProductRevisionService {
                 || !seller.equals(shipping.accountId())
                 || shipping.dispatchAddress() == null
                 || shipping.returnAddress() == null) fail(ProductErrorCode.POLICY);
-        validateImages(p, r);
         validateTime(r);
         var revision =
                 ProductRevision.builder()
@@ -75,10 +70,6 @@ public class ProductRevisionServiceImpl implements ProductRevisionService {
                         .build();
         revision.previousSnapshot = json.writeValueAsString(ProductResponse.from(p));
         revision = revisions.saveAndFlush(revision);
-        for (var image : images.findByProductIdAndAttachedTrueOrderByPositionAsc(product))
-            image.revisionReferenced = true;
-        // 심사 중·반려 이력에서 참조하는 불변 객체를 미사용 정리 작업이 삭제하지 않게 보존합니다.
-        for (var id : r.imageIds()) images.findById(id).orElseThrow().revisionReferenced = true;
         return response(revision);
     }
 
@@ -105,11 +96,6 @@ public class ProductRevisionServiceImpl implements ProductRevisionService {
         return response(ownRevision(product, revision));
     }
 
-    @Transactional(readOnly = true)
-    public boolean containsImage(UUID product, UUID revision, UUID image) {
-        return snapshot(ownRevision(product, revision)).changes().imageIds().contains(image);
-    }
-
     public ProductRevisionResponse decide(
             UUID admin, UUID product, UUID revision, ReviewProductRequest r) {
         var p = locked(product);
@@ -124,32 +110,16 @@ public class ProductRevisionServiceImpl implements ProductRevisionService {
             var s = snapshot(v);
             var c = s.changes();
             validateTime(c);
-            validateImages(p, c);
-            p.name = c.name().trim();
             p.description = c.description().trim();
-            p.shippingFee = c.shippingFee();
-            p.dispatchBusinessDays = c.dispatchBusinessDays();
-            p.shippingNotice = c.shippingNotice();
             p.purchaseNotice = c.purchaseNotice();
+            p.shippingFee = c.shippingFee();
+            // 가격 항목이 없던 이전 형식의 심사본은 기존 가격을 유지합니다.
+            if (c.price() != null) p.price = c.price();
             p.startsAt = c.startsAt().toInstant();
             p.endsAt = p.startsAt.plus(Duration.ofHours(3));
             p.dispatchAddress = address(s.shipping().dispatchAddress());
             p.returnAddress = address(s.shipping().returnAddress());
             p.addressesCapturedAt = v.submittedAt;
-            var old = images.findByProductIdAndAttachedTrueOrderByPositionAsc(product);
-            old.forEach(
-                    i -> {
-                        i.attached = false;
-                        i.representative = false;
-                        i.revisionReferenced = true;
-                    });
-            for (int n = 0; n < c.imageIds().size(); n++) {
-                var i = images.findById(c.imageIds().get(n)).orElseThrow();
-                i.attached = true;
-                i.position = n;
-                i.representative = i.id.equals(c.representativeId());
-                i.revisionCandidate = false;
-            }
             p.changeId = UUID.randomUUID();
             p.updatedAt = clock.instant();
             products.flush();
@@ -175,24 +145,6 @@ public class ProductRevisionServiceImpl implements ProductRevisionService {
 
     private void validateTime(ProductRevisionRequest r) {
         if (!r.startsAt().toInstant().isAfter(clock.instant())) fail(ProductErrorCode.INVALID);
-    }
-
-    private void validateImages(Product p, ProductRevisionRequest r) {
-        if (r.imageIds().isEmpty()
-                || r.imageIds().size() > 10
-                || new HashSet<>(r.imageIds()).size() != r.imageIds().size()
-                || !r.imageIds().contains(r.representativeId())) fail(ProductErrorCode.INVALID);
-        for (var id : r.imageIds()) {
-            var i =
-                    images.findById(id)
-                            .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND));
-            if (!p.id.equals(i.productId) || !p.sellerId.equals(i.sellerId))
-                fail(ProductErrorCode.NOT_OWNER);
-            if (i.objectKey == null
-                    || (!i.attached && i.storageCleaned)
-                    || (!i.attached && !Boolean.TRUE.equals(i.revisionCandidate)))
-                fail(ProductErrorCode.INVALID);
-        }
     }
 
     private void beforeSale(Product p) {

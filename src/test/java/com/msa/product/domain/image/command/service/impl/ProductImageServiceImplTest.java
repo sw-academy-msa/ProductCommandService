@@ -63,32 +63,15 @@ class ProductImageServiceImplTest {
     }
 
     @Test
-    void approvedProductCompletionOnlyCreatesCandidateAndCannotChangePublishedImages() {
+    void approvedProductRejectsNewImagesAndCannotChangePublishedImages() {
         p.status = Product.Status.APPROVED;
         p.startsAt = now.plusSeconds(3600);
-        when(images.countByProductIdAndAttachedTrue(p.id)).thenReturn(10L);
-        when(s3.headObject(any(HeadObjectRequest.class)))
-                .thenReturn(
-                        HeadObjectResponse.builder()
-                                .contentLength(16L)
-                                .contentType("image/png")
-                                .eTag("v1")
-                                .build());
-        when(s3.getObjectAsBytes(any(GetObjectRequest.class)))
-                .thenReturn(
-                        ResponseBytes.fromByteArray(
-                                GetObjectResponse.builder().build(),
-                                new byte[] {(byte) 137, 80, 78, 71, 13, 10, 26, 10}));
-        service.complete(p.sellerId, p.id, image.id);
-        assertThat(image.attached).isFalse();
-        assertThat(image.revisionCandidate).isTrue();
-        service.complete(p.sellerId, p.id, image.id);
-        verify(s3, times(1)).copyObject(any(CopyObjectRequest.class));
-        assertThatThrownBy(() -> service.detach(p.sellerId, p.id, image.id))
-                .isInstanceOf(BusinessException.class);
-        p.startsAt = now;
         assertThatThrownBy(() -> service.complete(p.sellerId, p.id, image.id))
                 .isInstanceOf(BusinessException.class);
+        assertThatThrownBy(() -> service.detach(p.sellerId, p.id, image.id))
+                .isInstanceOf(BusinessException.class);
+        assertThat(image.attached).isFalse();
+        verifyNoInteractions(s3);
     }
 
     @Test

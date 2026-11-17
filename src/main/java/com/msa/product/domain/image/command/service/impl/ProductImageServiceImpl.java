@@ -239,18 +239,15 @@ public class ProductImageServiceImpl implements ProductImageService {
         // 즉시 S3를 삭제하지 않습니다. DB 커밋 실패 시 참조가 깨지지 않도록 후속 정리 대상으로 남깁니다.
     }
 
-    /** 승인 상품의 새 업로드는 판매 시작 전 후보로만 저장합니다. 기존 공개 이미지는 수정하지 않습니다. */
+    /** 수정 심사는 이미지를 바꾸지 않으므로 승인 상품에는 새 이미지를 올릴 수 없습니다. 기존 공개 이미지는 수정하지 않습니다. */
     private void uploadable(UUID seller, UUID product) {
         var p =
                 products.lock(product)
                         .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         p.requireOwner(seller);
-        if (p.status == com.msa.product.domain.product.entity.Product.Status.APPROVED) {
-            if (p.startsAt == null || !clock.instant().isBefore(p.startsAt))
-                throw new ImageException(ImageErrorCode.STATE);
-        } else {
-            p.requireEditable(seller);
-        }
+        if (p.status == com.msa.product.domain.product.entity.Product.Status.APPROVED)
+            throw new ImageException(ImageErrorCode.STATE);
+        p.requireEditable(seller);
     }
 
     private boolean approved(UUID id) {

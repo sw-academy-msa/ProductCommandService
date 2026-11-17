@@ -111,14 +111,10 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
     ProductRevisionRequest request(long version) {
         return ProductRevisionRequest.builder()
                 .expectedVersion(version)
-                .name("변경 이름")
                 .description("변경 설명")
-                .imageIds(List.of(image))
-                .representativeId(image)
-                .shippingFee(2000L)
-                .dispatchBusinessDays(3)
-                .shippingNotice("변경 안내")
                 .purchaseNotice("확인")
+                .shippingFee(2000L)
+                .price(1500L)
                 .startsAt(now.plusSeconds(7200).atOffset(ZoneOffset.UTC))
                 .build();
     }
@@ -134,7 +130,8 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
     @Test
     void submissionPreservesPublishedProductAndApprovalOnlyAppliesPermittedFields() {
         var v = submit();
-        assertThat(queries.get(seller, product).name()).isEqualTo("원래 이름");
+        assertThat(queries.get(seller, product).description()).isEqualTo("원래 설명");
+        assertThat(queries.get(seller, product).price()).isEqualTo(1000);
         assertThat(queries.get(seller, product).status()).isEqualTo(Product.Status.APPROVED);
         assertThat(revisions.findById(v.id()).orElseThrow().previousSnapshot).contains("원래 이름");
         var before = queries.get(seller, product).options().getFirst();
@@ -146,8 +143,12 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
                         new ReviewProductRequest(v.version(), true, null));
         assertThat(approved.status()).isEqualTo(ProductRevision.Status.APPROVED);
         var p = queries.get(seller, product);
-        assertThat(p.name()).isEqualTo("변경 이름");
-        assertThat(p.price()).isEqualTo(1000);
+        // 상품명은 수정 대상이 아니며 설명·배송비·가격만 승인본에 반영됩니다.
+        assertThat(p.name()).isEqualTo("원래 이름");
+        assertThat(p.description()).isEqualTo("변경 설명");
+        assertThat(p.shippingFee()).isEqualTo(2000);
+        assertThat(p.price()).isEqualTo(1500);
+        assertThat(p.dispatchBusinessDays()).isEqualTo(2);
         assertThat(p.options().getFirst()).isEqualTo(before);
         assertThat(p.endsAt()).isEqualTo(p.startsAt().plusSeconds(10800));
         assertThatThrownBy(
@@ -169,7 +170,7 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
                 product,
                 v.id(),
                 new ReviewProductRequest(v.version(), false, "사진 확인 필요"));
-        assertThat(queries.get(seller, product).name()).isEqualTo("원래 이름");
+        assertThat(queries.get(seller, product).description()).isEqualTo("원래 설명");
         var next = submit();
         assertThat(next.id()).isNotEqualTo(v.id());
         assertThat(service.history(seller, product)).hasSize(2);
@@ -189,7 +190,7 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
                                         new ReviewProductRequest(v.version(), true, null)))
                 .isInstanceOf(ProductException.class);
         assertThatThrownBy(this::submit).isInstanceOf(ProductException.class);
-        assertThat(queries.get(seller, product).name()).isEqualTo("원래 이름");
+        assertThat(queries.get(seller, product).description()).isEqualTo("원래 설명");
         service.decide(
                 UUID.randomUUID(),
                 product,
@@ -198,26 +199,23 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
     }
 
     @Test
-    void refusesForeignProductForeignImagesUnverifiedImagesAndStaleVersion() {
+    void refusesForeignProductStaleVersionAndPastStart() {
         assertThatThrownBy(() -> service.submit(UUID.randomUUID(), product, request(0), shipping()))
                 .isInstanceOf(ProductException.class);
         assertThatThrownBy(() -> service.history(UUID.randomUUID(), product))
                 .isInstanceOf(ProductException.class);
         assertThatThrownBy(() -> service.submit(seller, product, request(999), shipping()))
                 .isInstanceOf(ProductException.class);
-        tx.executeWithoutResult(
-                s -> {
-                    var i = images.findById(image).orElseThrow();
-                    i.sellerId = UUID.randomUUID();
-                });
-        assertThatThrownBy(this::submit).isInstanceOf(ProductException.class);
-        tx.executeWithoutResult(
-                s -> {
-                    var i = images.findById(image).orElseThrow();
-                    i.sellerId = seller;
-                    i.objectKey = null;
-                });
-        assertThatThrownBy(this::submit).isInstanceOf(ProductException.class);
+        var past =
+                ProductRevisionRequest.builder()
+                        .expectedVersion(products.findById(product).orElseThrow().version)
+                        .description("변경 설명")
+                        .shippingFee(0L)
+                        .price(1000L)
+                        .startsAt(now.atOffset(ZoneOffset.UTC))
+                        .build();
+        assertThatThrownBy(() -> service.submit(seller, product, past, shipping()))
+                .isInstanceOf(ProductException.class);
         assertThat(revisions.history(product)).isEmpty();
     }
 
@@ -248,28 +246,8 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
     }
 
     @Test
-    void newCandidateIsNotPublishedBeforeApprovalAndOriginalImageSurvivesRejection() {
-        UUID candidate =
-                tx.execute(
-                        s -> {
-                            var i =
-                                    ProductImage.builder()
-                                            .product(product)
-                                            .seller(seller)
-                                            .type("image/png")
-                                            .size(16)
-                                            .expiry(now.plusSeconds(300))
-                                            .build();
-                            i.objectKey = "synthetic/candidate";
-                            i.revisionCandidate = true;
-                            images.saveAndFlush(i);
-                            return i.id;
-                        });
-        image = candidate;
+    void approvalKeepsPublishedImagesUntouched() {
         var v = submit();
-        assertThat(images.findByProductIdAndAttachedTrueOrderByPositionAsc(product))
-                .hasSize(1)
-                .noneMatch(i -> i.id.equals(candidate));
         service.decide(
                 UUID.randomUUID(),
                 product,
@@ -277,8 +255,7 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
                 new ReviewProductRequest(v.version(), true, null));
         assertThat(images.findByProductIdAndAttachedTrueOrderByPositionAsc(product))
                 .extracting(i -> i.id)
-                .containsExactly(candidate);
-        assertThat(images.findById(candidate).orElseThrow().revisionReferenced).isTrue();
+                .containsExactly(image);
     }
 
     @Test
