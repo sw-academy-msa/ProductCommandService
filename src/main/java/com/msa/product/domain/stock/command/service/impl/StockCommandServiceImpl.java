@@ -78,6 +78,11 @@ public class StockCommandServiceImpl implements StockCommandService {
             expireHeld(p, r);
             return response(r);
         }
+        // 판매자 ID는 이 서비스만 원본으로 가지므로 자기 상품 구매는 Order가 아니라 여기서 막습니다.
+        // 판매 기간과 관계없이 거절해 프론트가 판매 상태 오류와 구분할 수 있게 합니다.
+        if (request.buyerId().equals(p.sellerId)) {
+            fail(StockErrorCode.SELF_PURCHASE);
+        }
         Instant now = clock.instant();
         if (!p.isOnSale(now)) {
             fail(StockErrorCode.STATE);

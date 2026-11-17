@@ -36,7 +36,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
     @Autowired ActiveStockReservationRepository active;
     @Autowired TransactionTemplate tx;
     @Autowired MutableClock clock;
-    UUID product, optionA, optionB;
+    UUID product, seller, optionA, optionB;
     Instant start = Instant.parse("2030-01-01T00:00:00Z");
 
     @Test
@@ -82,7 +82,8 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
                     active.deleteAll();
                     reservations.deleteAll();
                     products.deleteAll();
-                    var p = new Product(UUID.randomUUID());
+                    seller = UUID.randomUUID();
+                    var p = new Product(seller);
                     p.status = Product.Status.APPROVED;
                     p.name = "테스트 상품";
                     p.price = 1000L;
@@ -154,6 +155,17 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         service.reserve(request(UUID.randomUUID(), buyer, 1, 0));
         assertThatThrownBy(() -> service.reserve(request(UUID.randomUUID(), buyer, 1, 0)))
                 .isInstanceOf(StockException.class);
+    }
+
+    @Test
+    void sellerCannotReserveOwnProduct() {
+        assertThatThrownBy(() -> service.reserve(request(UUID.randomUUID(), seller, 1, 0)))
+                .isInstanceOfSatisfying(
+                        StockException.class,
+                        ex -> assertThat(ex.getErrorCode().code()).isEqualTo("PRODUCT_SELF_PURCHASE"));
+        // 거절된 요청은 재고·확보 기록을 남기지 않습니다.
+        assertThat(available(optionA)).isEqualTo(5);
+        assertThat(reservations.count()).isZero();
     }
 
     @Test
