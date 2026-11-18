@@ -22,6 +22,4 @@ public interface ProductRevisionService {
 
     ProductRevisionResponse decide(
             UUID admin, UUID product, UUID revision, ReviewProductRequest request);
-
-    boolean containsImage(UUID product, UUID revision, UUID image);
 }

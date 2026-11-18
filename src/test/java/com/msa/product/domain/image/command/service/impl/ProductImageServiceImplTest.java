@@ -63,32 +63,21 @@ class ProductImageServiceImplTest {
     }
 
     @Test
-    void approvedProductCompletionOnlyCreatesCandidateAndCannotChangePublishedImages() {
+    void approvedProductRejectsNewImagesAndCannotChangePublishedImages() {
         p.status = Product.Status.APPROVED;
         p.startsAt = now.plusSeconds(3600);
-        when(images.countByProductIdAndAttachedTrue(p.id)).thenReturn(10L);
-        when(s3.headObject(any(HeadObjectRequest.class)))
-                .thenReturn(
-                        HeadObjectResponse.builder()
-                                .contentLength(16L)
-                                .contentType("image/png")
-                                .eTag("v1")
-                                .build());
-        when(s3.getObjectAsBytes(any(GetObjectRequest.class)))
-                .thenReturn(
-                        ResponseBytes.fromByteArray(
-                                GetObjectResponse.builder().build(),
-                                new byte[] {(byte) 137, 80, 78, 71, 13, 10, 26, 10}));
-        service.complete(p.sellerId, p.id, image.id);
-        assertThat(image.attached).isFalse();
-        assertThat(image.revisionCandidate).isTrue();
-        service.complete(p.sellerId, p.id, image.id);
-        verify(s3, times(1)).copyObject(any(CopyObjectRequest.class));
-        assertThatThrownBy(() -> service.detach(p.sellerId, p.id, image.id))
-                .isInstanceOf(BusinessException.class);
-        p.startsAt = now;
         assertThatThrownBy(() -> service.complete(p.sellerId, p.id, image.id))
                 .isInstanceOf(BusinessException.class);
+        assertThat(image.attached).isFalse();
+        // 이미 공개된 이미지를 떼려는 요청도 거부하고, 거부 뒤에도 연결 상태를 유지합니다.
+        var published = new ProductImage(p.id, p.sellerId, "image/png", 16, now.plusSeconds(300));
+        published.attached = true;
+        published.objectKey = "product-images/" + p.id + "/" + published.id;
+        when(images.findById(published.id)).thenReturn(Optional.of(published));
+        assertThatThrownBy(() -> service.detach(p.sellerId, p.id, published.id))
+                .isInstanceOf(BusinessException.class);
+        assertThat(published.attached).isTrue();
+        verifyNoInteractions(s3);
     }
 
     @Test

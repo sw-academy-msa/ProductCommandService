@@ -59,7 +59,7 @@ public class ProductImageServiceImpl implements ProductImageService {
                 || request.sizeBytes() > policy.maxBytes()) {
             throw new ImageException(ImageErrorCode.INVALID);
         }
-        if (!approved(product) && images.countByProductIdAndAttachedTrue(product) >= 10) {
+        if (images.countByProductIdAndAttachedTrue(product) >= 10) {
             throw new ImageException(ImageErrorCode.STATE);
         }
         var image =
@@ -108,7 +108,7 @@ public class ProductImageServiceImpl implements ProductImageService {
             throw new ImageException(ImageErrorCode.POLICY);
         }
         if (!clock.instant().isBefore(image.expiresAt)
-                || (!approved(product) && images.countByProductIdAndAttachedTrue(product) >= 10)) {
+                || images.countByProductIdAndAttachedTrue(product) >= 10) {
             throw new ImageException(ImageErrorCode.STATE);
         }
         try {
@@ -148,8 +148,9 @@ public class ProductImageServiceImpl implements ProductImageService {
             var current = images.findByProductIdAndAttachedTrueOrderByPositionAsc(product);
             image.position = current.size();
             image.representative = current.isEmpty();
-            image.revisionCandidate = approved(product);
-            image.attached = !Boolean.TRUE.equals(image.revisionCandidate);
+            // 승인 상품은 uploadable()에서 이미 막혀 여기까지 오지 않습니다. 수정 심사 후보 이미지는 더 만들지 않습니다.
+            image.revisionCandidate = false;
+            image.attached = true;
             return ImageResponse.from(image);
         } catch (S3Exception ex) {
             // 객체 미존재·ETag 경합과 S3 장애를 구분하고 원문 주소·서명은 응답/로그에 노출하지 않습니다.
@@ -239,24 +240,17 @@ public class ProductImageServiceImpl implements ProductImageService {
         // 즉시 S3를 삭제하지 않습니다. DB 커밋 실패 시 참조가 깨지지 않도록 후속 정리 대상으로 남깁니다.
     }
 
-    /** 승인 상품의 새 업로드는 판매 시작 전 후보로만 저장합니다. 기존 공개 이미지는 수정하지 않습니다. */
+    /** 수정 심사는 이미지를 바꾸지 않으므로 승인 상품에는 새 이미지를 올릴 수 없습니다. 기존 공개 이미지는 수정하지 않습니다. */
     private void uploadable(UUID seller, UUID product) {
         var p =
                 products.lock(product)
                         .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
         p.requireOwner(seller);
-        if (p.status == com.msa.product.domain.product.entity.Product.Status.APPROVED) {
-            if (p.startsAt == null || !clock.instant().isBefore(p.startsAt))
-                throw new ImageException(ImageErrorCode.STATE);
-        } else {
-            p.requireEditable(seller);
-        }
+        if (p.status == com.msa.product.domain.product.entity.Product.Status.APPROVED)
+            throw new ImageException(ImageErrorCode.STATE);
+        p.requireEditable(seller);
     }
 
-    private boolean approved(UUID id) {
-        return products.findById(id).orElseThrow().status
-                == com.msa.product.domain.product.entity.Product.Status.APPROVED;
-    }
 
     private void editable(UUID seller, UUID product) {
         products.lock(product)

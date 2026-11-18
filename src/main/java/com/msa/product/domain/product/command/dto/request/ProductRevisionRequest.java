@@ -7,18 +7,17 @@ import lombok.Builder;
 import java.time.OffsetDateTime;
 import java.util.*;
 
-/** 승인 상품의 변경 심사본입니다. 가격·옵션·최초 수량은 계약에 포함하지 않아 변경을 차단합니다. */
+/**
+ * 승인 상품의 판매 시작 전 변경 심사본입니다. 설명·구매 안내·배송비·가격·판매 시작 시각·출고지·반품지만 바꿉니다. 상품명·이미지·옵션·최초 수량은
+ * 계약에 포함하지 않아 변경을 차단하며, 종료 시각은 시작 후 3시간으로 고정합니다.
+ */
 @Builder
 public record ProductRevisionRequest(
         @NotNull @PositiveOrZero Long expectedVersion,
-        @NotBlank @Size(max = 200) String name,
         @NotBlank @Size(max = 20000) String description,
-        @NotEmpty @Size(max = 10) List<@NotNull UUID> imageIds,
-        @NotNull UUID representativeId,
-        @NotNull @PositiveOrZero Long shippingFee,
-        @NotNull @Positive Integer dispatchBusinessDays,
-        @Size(max = 4000) String shippingNotice,
         @Size(max = 4000) String purchaseNotice,
+        @NotNull @PositiveOrZero Long shippingFee,
+        @NotNull @Positive Long price,
         @NotNull OffsetDateTime startsAt,
         UUID dispatchAddressId,
         UUID returnAddressId) {
