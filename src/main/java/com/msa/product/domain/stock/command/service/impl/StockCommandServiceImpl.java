@@ -67,6 +67,12 @@ public class StockCommandServiceImpl implements StockCommandService {
                 fail(StockErrorCode.INVALID);
             }
         }
+        // 판매자 ID는 이 서비스만 원본으로 가지므로 자기 상품 구매는 Order가 아니라 여기서 막습니다.
+        // 판매 기간과 관계없이 거절해 프론트가 판매 상태 오류와 구분할 수 있게 합니다.
+        // 같은 주문 ID의 기존 확보(차단 도입 전에 만들어진 것 포함)를 돌려주기 전에 검사합니다.
+        if (request.buyerId().equals(p.sellerId)) {
+            fail(StockErrorCode.SELF_PURCHASE);
+        }
         var prior = reservations.findByOrderId(request.orderId());
         if (prior.isPresent()) {
             var r = prior.get();
@@ -77,11 +83,6 @@ public class StockCommandServiceImpl implements StockCommandService {
             }
             expireHeld(p, r);
             return response(r);
-        }
-        // 판매자 ID는 이 서비스만 원본으로 가지므로 자기 상품 구매는 Order가 아니라 여기서 막습니다.
-        // 판매 기간과 관계없이 거절해 프론트가 판매 상태 오류와 구분할 수 있게 합니다.
-        if (request.buyerId().equals(p.sellerId)) {
-            fail(StockErrorCode.SELF_PURCHASE);
         }
         Instant now = clock.instant();
         if (!p.isOnSale(now)) {

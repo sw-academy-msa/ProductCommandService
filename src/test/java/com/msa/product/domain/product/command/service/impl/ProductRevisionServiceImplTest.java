@@ -177,6 +177,35 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
     }
 
     @Test
+    void legacyRevisionWithoutPriceCannotBeApprovedButCanBeRejected() {
+        var v = submit();
+        // 가격 항목이 없는 이전 형식(상품명·이미지 변경 포함) 회차를 흉내 냅니다.
+        tx.executeWithoutResult(
+                s -> {
+                    var r = revisions.findById(v.id()).orElseThrow();
+                    r.snapshot = r.snapshot.replace("\"price\":1500", "\"price\":null");
+                });
+        long version = revisions.findById(v.id()).orElseThrow().version;
+        assertThatThrownBy(
+                        () ->
+                                service.decide(
+                                        UUID.randomUUID(),
+                                        product,
+                                        v.id(),
+                                        new ReviewProductRequest(version, true, null)))
+                .isInstanceOf(ProductException.class);
+        assertThat(queries.get(seller, product).description()).isEqualTo("원래 설명");
+        assertThat(queries.get(seller, product).price()).isEqualTo(1000);
+        var rejected =
+                service.decide(
+                        UUID.randomUUID(),
+                        product,
+                        v.id(),
+                        new ReviewProductRequest(version, false, "새 형식으로 다시 제출해 주세요"));
+        assertThat(rejected.status()).isEqualTo(ProductRevision.Status.REJECTED);
+    }
+
+    @Test
     void saleStartingDuringReviewKeepsOldSaleAndCannotBeReopenedByApproval() {
         var v = submit();
         clock.set(now.plusSeconds(3600));

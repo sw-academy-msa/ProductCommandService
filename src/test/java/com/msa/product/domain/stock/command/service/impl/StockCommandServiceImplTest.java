@@ -35,6 +35,7 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
     @Autowired StockReservationRepository reservations;
     @Autowired ActiveStockReservationRepository active;
     @Autowired TransactionTemplate tx;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired MutableClock clock;
     UUID product, seller, optionA, optionB;
     Instant start = Instant.parse("2030-01-01T00:00:00Z");
@@ -166,6 +167,19 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
         // 거절된 요청은 재고·확보 기록을 남기지 않습니다.
         assertThat(available(optionA)).isEqualTo(5);
         assertThat(reservations.count()).isZero();
+    }
+
+    @Test
+    void existingReservationOfOwnProductIsAlsoRejected() {
+        // 차단 도입 전에 만들어진 확보가 있어도, 같은 주문 ID 재요청에 기존 확보를 돌려주지 않습니다.
+        UUID buyer = UUID.randomUUID(), order = UUID.randomUUID();
+        service.reserve(request(order, buyer, 1, 0));
+        // sellerId는 엔티티에서 수정할 수 없는 컬럼이라 테스트에서만 SQL로 바꿉니다.
+        jdbc.update("update product.products set seller_id = ? where id = ?", buyer, product);
+        assertThatThrownBy(() -> service.reserve(request(order, buyer, 1, 0)))
+                .isInstanceOfSatisfying(
+                        StockException.class,
+                        ex -> assertThat(ex.getErrorCode().code()).isEqualTo("PRODUCT_SELF_PURCHASE"));
     }
 
     @Test

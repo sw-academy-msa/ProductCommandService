@@ -109,12 +109,14 @@ public class ProductRevisionServiceImpl implements ProductRevisionService {
             beforeSale(p);
             var s = snapshot(v);
             var c = s.changes();
+            // 가격 항목이 없는 회차는 상품명·이미지 등도 바꾸던 이전 형식입니다. 일부만 반영하고 승인으로 기록하지 않도록
+            // 승인을 막고, 운영자가 반려해 판매자가 새 형식으로 다시 제출하게 합니다.
+            if (c.price() == null) fail(ProductErrorCode.STATE);
             validateTime(c);
             p.description = c.description().trim();
             p.purchaseNotice = c.purchaseNotice();
             p.shippingFee = c.shippingFee();
-            // 가격 항목이 없던 이전 형식의 심사본은 기존 가격을 유지합니다.
-            if (c.price() != null) p.price = c.price();
+            p.price = c.price();
             p.startsAt = c.startsAt().toInstant();
             p.endsAt = p.startsAt.plus(Duration.ofHours(3));
             p.dispatchAddress = address(s.shipping().dispatchAddress());

@@ -59,7 +59,7 @@ public class ProductImageServiceImpl implements ProductImageService {
                 || request.sizeBytes() > policy.maxBytes()) {
             throw new ImageException(ImageErrorCode.INVALID);
         }
-        if (!approved(product) && images.countByProductIdAndAttachedTrue(product) >= 10) {
+        if (images.countByProductIdAndAttachedTrue(product) >= 10) {
             throw new ImageException(ImageErrorCode.STATE);
         }
         var image =
@@ -108,7 +108,7 @@ public class ProductImageServiceImpl implements ProductImageService {
             throw new ImageException(ImageErrorCode.POLICY);
         }
         if (!clock.instant().isBefore(image.expiresAt)
-                || (!approved(product) && images.countByProductIdAndAttachedTrue(product) >= 10)) {
+                || images.countByProductIdAndAttachedTrue(product) >= 10) {
             throw new ImageException(ImageErrorCode.STATE);
         }
         try {
@@ -148,8 +148,9 @@ public class ProductImageServiceImpl implements ProductImageService {
             var current = images.findByProductIdAndAttachedTrueOrderByPositionAsc(product);
             image.position = current.size();
             image.representative = current.isEmpty();
-            image.revisionCandidate = approved(product);
-            image.attached = !Boolean.TRUE.equals(image.revisionCandidate);
+            // 승인 상품은 uploadable()에서 이미 막혀 여기까지 오지 않습니다. 수정 심사 후보 이미지는 더 만들지 않습니다.
+            image.revisionCandidate = false;
+            image.attached = true;
             return ImageResponse.from(image);
         } catch (S3Exception ex) {
             // 객체 미존재·ETag 경합과 S3 장애를 구분하고 원문 주소·서명은 응답/로그에 노출하지 않습니다.
@@ -250,10 +251,6 @@ public class ProductImageServiceImpl implements ProductImageService {
         p.requireEditable(seller);
     }
 
-    private boolean approved(UUID id) {
-        return products.findById(id).orElseThrow().status
-                == com.msa.product.domain.product.entity.Product.Status.APPROVED;
-    }
 
     private void editable(UUID seller, UUID product) {
         products.lock(product)
