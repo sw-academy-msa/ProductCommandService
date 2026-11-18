@@ -1,0 +1,17 @@
+# 로컬 실행 정보와 빌드 산출물을 제외합니다.
+.gradle/
+build/
+.idea/
+.vscode/
+*.iml
+.env
+.env.*
+!.env.example
+.keys/
+# 로컬 Command DB 관리자 비밀번호 파일은 추적하지 않습니다.
+.secrets/
+logs/
+*.log
+# Account/Gateway의 문서 관리 규칙을 따르며 기존 추적 readMe.md는 보존합니다.
+/docs/
+/AGENTS.md

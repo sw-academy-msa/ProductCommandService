@@ -1,0 +1,33 @@
+# 일반 DB(5433)와 분리된 Command PostgreSQL에 Product 전용 계정으로 접속합니다.
+spring:
+  config:
+    # 로컬 비밀 설정은 로컬에서만 읽고 test/prod에는 전파하지 않습니다.
+    import: optional:file:./.env[.properties]
+  flyway:
+    # Flyway 통합 전 update와 분류 전용 이력으로 V1~V3 내용이 이미 있는 개발 DB는 실행하지 않고 V3까지 적용된 것으로 기록합니다.
+    # 빈 DB에서는 V1부터 실행합니다. 이전 category_schema_history 테이블은 더 이상 읽지 않습니다.
+    baseline-on-migrate: true
+    baseline-version: 3
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/product_command}
+    username: ${DB_USERNAME:product}
+    # 생성 스크립트가 .env에 저장한 비밀번호를 사용합니다. 공통 고정 비밀번호로 대체하지 않습니다.
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      # 운영 마이그레이션을 대신하지 않는 개발 전용 정책입니다.
+      ddl-auto: update
+product:
+  seller-account:
+    # 로컬 프로필에서만 Account 판매자 API를 평문 http로 호출합니다.
+    scheme: http
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+logging:
+  level:
+    com.msa.product: INFO

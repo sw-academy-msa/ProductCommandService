@@ -1,0 +1,32 @@
+# 일반 DB와 물리적으로 분리된 로컬 Command PostgreSQL입니다. 구매 앱 복제본들이 이 한 DB 서버를 공유합니다.
+name: stockdrop-command
+services:
+  command-postgres:
+    image: postgres:17-alpine
+    container_name: stockdrop-command-postgres
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: command_local_admin
+      # 관리자 비밀번호를 Compose 본문이나 컨테이너 환경변수 값에 직접 넣지 않습니다.
+      POSTGRES_PASSWORD_FILE: /run/secrets/command_db_admin_password
+      TZ: UTC
+    ports:
+      - "127.0.0.1:${COMMAND_DB_PORT:-5434}:5432"
+    volumes:
+      - command-postgres-data:/var/lib/postgresql/data
+    secrets:
+      - command_db_admin_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U command_local_admin -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 40s
+volumes:
+  command-postgres-data:
+    name: stockdrop-command-postgres-data
+secrets:
+  command_db_admin_password:
+    file: ./.secrets/command-postgres-admin-password
