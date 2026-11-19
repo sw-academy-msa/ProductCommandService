@@ -108,6 +108,19 @@ class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
     }
 
     @Test
+    void sourceUrlChangeReusesAnalysisAndIsNotSentToModel() {
+        tx.executeWithoutResult(
+                s -> products.findById(product).orElseThrow().sourceUrl = "https://shop.example/a");
+        var first = service.request(seller, product, version());
+        tx.executeWithoutResult(
+                s -> products.findById(product).orElseThrow().sourceUrl = "https://shop.example/b");
+        var repeated = service.request(seller, product, version());
+        assertThat(repeated.requestId()).isEqualTo(first.requestId());
+        var payload = outbox.findById(first.requestId()).orElseThrow().payload;
+        assertThat(json.readValue(payload, Requested.class).input().sourceUrl()).isNull();
+    }
+
+    @Test
     void missingImageAndWrongOwnerCannotEnqueue() {
         long before = outbox.count();
         assertThatThrownBy(() -> service.request(UUID.randomUUID(), product, version()))
