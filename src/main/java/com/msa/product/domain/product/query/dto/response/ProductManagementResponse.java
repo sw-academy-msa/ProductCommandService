@@ -29,7 +29,11 @@ public record ProductManagementResponse(
             Instant endsAt,
             Instant createdAt,
             Instant updatedAt,
-            Instant submittedAt) {
+            Instant submittedAt,
+            String category,
+            Long price,
+            int totalQuantity,
+            int soldQuantity) {
         /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
         public static class ItemBuilder {
             @Override
@@ -49,6 +53,11 @@ public record ProductManagementResponse(
                     .createdAt(p.createdAt)
                     .updatedAt(p.updatedAt)
                     .submittedAt(p.submittedAt)
+                    // 관리 목록 카드에 가격·한정 수량·판매 수량을 보여 주기 위한 값입니다.
+                    .category(p.category)
+                    .price(p.price)
+                    .totalQuantity(p.options.stream().mapToInt(o -> o.initialQuantity).sum())
+                    .soldQuantity(p.options.stream().mapToInt(o -> o.confirmedQuantity).sum())
                     .build();
         }
     }
