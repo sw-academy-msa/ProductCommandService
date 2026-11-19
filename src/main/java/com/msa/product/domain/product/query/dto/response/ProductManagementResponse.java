@@ -22,6 +22,8 @@ public record ProductManagementResponse(
     @Builder
     public record Item(
             UUID id,
+            // 운영자 심사 목록에서 판매자 이름을 찾는 데 쓴다(판매자 본인 목록에서는 자기 id)
+            UUID sellerId,
             String name,
             Product.Status status,
             long version,
@@ -45,6 +47,7 @@ public record ProductManagementResponse(
         public static Item from(Product p) {
             return Item.builder()
                     .id(p.id)
+                    .sellerId(p.sellerId)
                     .name(p.name)
                     .status(p.status)
                     .version(p.version)
