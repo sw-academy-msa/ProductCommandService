@@ -25,6 +25,7 @@ class ProductManagementResponseTest {
         var item = ProductManagementResponse.Item.from(p);
 
         assertThat(item.price()).isEqualTo(1000L);
+        assertThat(item.sellerId()).isEqualTo(p.sellerId);
         assertThat(item.category()).isEqualTo("숏패딩");
         assertThat(item.totalQuantity()).isEqualTo(5);
         assertThat(item.soldQuantity()).isEqualTo(1);
