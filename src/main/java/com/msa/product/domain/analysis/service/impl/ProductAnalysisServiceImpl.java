@@ -201,11 +201,12 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                                                 && i.objectKey != null)
                         .map(i -> new Image(i.objectKey, i.contentType, i.sizeBytes))
                         .toList();
+        // 판매처 URL은 모델이 열어보지 않으므로 분석 입력에서 뺍니다. URL만 바꿔도 기존 분석과 AI 질문을 그대로 씁니다.
         return new Input(
                 p.name,
                 p.description,
                 p.brandOrStore,
-                p.sourceUrl,
+                null,
                 p.category,
                 p.disposalReason,
                 list);
