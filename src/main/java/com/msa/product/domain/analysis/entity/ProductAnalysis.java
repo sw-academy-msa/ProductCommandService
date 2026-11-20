@@ -11,11 +11,7 @@ import java.util.UUID;
 @Entity
 @Table(
         name = "product_analyses",
-        schema = "product",
-        uniqueConstraints =
-                @UniqueConstraint(
-                        name = "uk_analysis_input",
-                        columnNames = {"productId", "fingerprint"}))
+        schema = "product")
 public class ProductAnalysis {
     @Id public UUID id;
 
@@ -33,6 +29,10 @@ public class ProductAnalysis {
 
     @Column(columnDefinition = "text")
     public String resultPayload;
+
+    // 실패 이력은 남기고 지문 재사용 대상에서 제외합니다. 부분 유일 인덱스는 Flyway가 관리합니다.
+    @Column(nullable = false, length = 20)
+    public String status = "PENDING";
 
     public Instant createdAt;
 

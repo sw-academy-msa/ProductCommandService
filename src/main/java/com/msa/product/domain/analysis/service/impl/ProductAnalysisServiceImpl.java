@@ -120,6 +120,15 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                 || !a.sellerId.equals(result.sellerId())
                 || !a.fingerprint.equals(result.fingerprint())) fail();
         var request = json.readValue(a.requestPayload, Requested.class);
+        // 종료 실패에는 추천이나 질문을 섞지 않습니다. 이전 requestId의 중복은 해당 이력에만 반영합니다.
+        if (result.outcome() == Outcome.FAILED) {
+            if (!"AI_ANALYSIS_ATTEMPTS_EXHAUSTED".equals(result.failureCode())
+                    || result.recommendedCategory() != null
+                    || result.questions() == null || !result.questions().isEmpty()) fail();
+            store(a, result);
+            return;
+        }
+        if (result.failureCode() != null) fail();
         // 결과 구분이 있으면 추천일 때만 카테고리가 있어야 합니다. 구분이 없는 이전 v1 메시지는 그대로 받습니다.
         if (result.outcome() != null
                 && (result.outcome() == Outcome.RECOMMENDED)
@@ -161,6 +170,7 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
     private void store(ProductAnalysis a, Completed result) {
         if (a.resultPayload == null) a.resultPayload = json.writeValueAsString(result);
         else if (!json.readValue(a.resultPayload, Completed.class).equals(result)) fail();
+        a.status = result.outcome() == Outcome.FAILED ? "FAILED" : "COMPLETED";
     }
 
     /** AI 질문 참조를 위조하거나 입력 변경 전의 질문을 새 상품 사실로 연결하지 못하게 합니다. */
@@ -234,7 +244,7 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                 .requestId(a.id)
                 .productId(a.productId)
                 .fingerprint(a.fingerprint)
-                .completed(a.resultPayload != null)
+                .completed(a.resultPayload != null && !"FAILED".equals(a.status))
                 .build();
     }
 

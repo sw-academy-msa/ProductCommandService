@@ -52,6 +52,11 @@ public abstract class ProductDatabaseTestSupport {
                                 new org.springframework.core.io.ClassPathResource(
                                         "db/migration/V3__expand_predefined_product_categories.sql"))
                         .execute(dataSource);
+                // Hibernate가 표현할 수 없는 부분 유일 인덱스도 실제 마이그레이션과 같게 적용합니다.
+                new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
+                        new org.springframework.core.io.ClassPathResource(
+                                "db/migration/V4__allow_retry_of_failed_analysis.sql"))
+                        .execute(dataSource);
             };
         }
     }

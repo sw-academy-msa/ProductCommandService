@@ -14,7 +14,7 @@ class CategoryMigrationTest {
         try (var db = new PostgreSQLContainer("postgres:17-alpine")) {
             db.start();
             var flyway = flyway(db).load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             assertThat(count(db, "select count(*) from product.product_categories"))
                     .isEqualTo(255);
@@ -29,7 +29,7 @@ class CategoryMigrationTest {
             db.start();
             assertThat(flyway(db).target("2").load().migrate().migrationsExecuted).isEqualTo(2);
             var upgrade = flyway(db).load();
-            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(1);
+            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(2);
             assertThat(upgrade.migrate().migrationsExecuted).isZero();
             assertThat(
                             count(
@@ -67,7 +67,8 @@ class CategoryMigrationTest {
                 statement.execute("create table product.existing_marker(id integer primary key)");
                 statement.execute("insert into product.existing_marker values (1)");
             }
-            var flyway = flyway(db).baselineOnMigrate(true).baselineVersion("3").load();
+            // 이 테스트의 가짜 개발 DB는 V3 기준점만 검증합니다. 실제 V3 -> V4는 별도 테스트합니다.
+            var flyway = flyway(db).baselineOnMigrate(true).baselineVersion("3").target("3").load();
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
             assertThat(count(db, "select count(*) from product.existing_marker")).isEqualTo(1);

@@ -12,7 +12,7 @@ import java.util.*;
 public interface ProductAnalysisRepository extends JpaRepository<ProductAnalysis, UUID> {
     @Query(
             "select a from ProductAnalysis a where a.productId=:product and"
-                    + " a.fingerprint=:fingerprint")
+                    + " a.fingerprint=:fingerprint and a.status <> 'FAILED'")
     Optional<ProductAnalysis> sameInput(UUID product, String fingerprint);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -21,6 +21,6 @@ public interface ProductAnalysisRepository extends JpaRepository<ProductAnalysis
 
     @Query(
             "select a from ProductAnalysis a where a.productId=:product and a.resultPayload is not"
-                    + " null")
+                    + " null and a.status <> 'FAILED'")
     List<ProductAnalysis> completed(UUID product);
 }
