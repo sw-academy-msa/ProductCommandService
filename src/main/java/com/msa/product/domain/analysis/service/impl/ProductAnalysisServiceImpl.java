@@ -28,7 +28,9 @@ import java.util.*;
 @Transactional
 public class ProductAnalysisServiceImpl implements ProductAnalysisService {
     // 질문 기준이 바뀌면 값을 올려 같은 입력도 새로 분석합니다. 이전 지문의 질문 참조는 계속 허용합니다.
-    private static final String ANALYSIS_VERSION = "buyer-questions-v2";
+    private static final String ANALYSIS_VERSION = "buyer-questions-v3";
+    // 이전 질문 기준 버전입니다. 이 버전으로 받은 질문 답도 입력이 같으면 FAQ로 저장할 수 있습니다.
+    private static final List<String> PREVIOUS_VERSIONS = List.of("buyer-questions-v2");
 
     private final ProductRepository products;
     private final ProductImageRepository images;
@@ -187,11 +189,16 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                             current.disposalReason(),
                             current.images());
             var catalog = categories.catalog();
-            // 질문 기준 버전을 넣기 전 분석의 질문도 입력이 같으면 그대로 FAQ로 연결합니다.
-            if (!a.fingerprint.equals(fingerprint(originalCategoryInput, catalog))
-                    && !a.fingerprint.equals(
-                            hash(json.writeValueAsString(List.of(originalCategoryInput, catalog)))))
-                continue;
+            // 이전 질문 기준 버전과 버전을 넣기 전 분석의 질문도 입력이 같으면 그대로 FAQ로 연결합니다.
+            var accepted = new HashSet<String>();
+            accepted.add(fingerprint(originalCategoryInput, catalog));
+            accepted.add(hash(json.writeValueAsString(List.of(originalCategoryInput, catalog))));
+            for (var version : PREVIOUS_VERSIONS)
+                accepted.add(
+                        hash(
+                                json.writeValueAsString(
+                                        List.of(originalCategoryInput, catalog, version))));
+            if (!accepted.contains(a.fingerprint)) continue;
             if (result.questions().stream()
                     .anyMatch(
                             q ->
