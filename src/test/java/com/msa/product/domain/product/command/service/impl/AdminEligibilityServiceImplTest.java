@@ -98,4 +98,15 @@ class AdminEligibilityServiceImplTest {
                 new SellerAccountProperties("http", "account-service"), unavailable);
         assertThat(noInstance.isCurrentAdmin("fixture-only")).isFalse();
     }
+
+    @Test
+    void deniesWhenRetryLoadBalancerRejectsNullInstance() {
+        // CI에서 확인한 RetryLoadBalancerInterceptor의 실제 인스턴스 부재 예외도 403으로 바꿔야 합니다.
+        var unavailable = RestClient.builder().requestInterceptor((request, body, execution) -> {
+            throw new IllegalArgumentException("Service Instance cannot be null, serviceId: account-service");
+        }).build();
+        var noInstance = new AdminEligibilityServiceImpl(
+                new SellerAccountProperties("http", "account-service"), unavailable);
+        assertThat(noInstance.isCurrentAdmin("fixture-only")).isFalse();
+    }
 }

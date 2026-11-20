@@ -29,7 +29,7 @@ public class AdminEligibilityServiceImpl implements AdminEligibilityService {
             var response = client.get().uri(endpoint).headers(h -> h.setBearerAuth(token))
                     .retrieve().toBodilessEntity();
             return response.getStatusCode().value() == 204;
-        } catch (RestClientException | IllegalStateException exception) {
+        } catch (RestClientException | IllegalStateException | IllegalArgumentException exception) {
             // 401/403, 타임아웃, Account 장애와 발견 가능한 인스턴스 부재는 모두 접근 거부입니다.
             return false;
         }
