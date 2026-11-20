@@ -53,7 +53,8 @@ public class CategoryServiceImpl implements CategoryService {
         var items = new LinkedHashMap<String, List<CategoryItem>>();
         for (var major : majors) items.put(major.code, new ArrayList<>());
         for (var c : active) {
-            var parent = parent(c, active);
+            // 중간 단계 분류가 생겨도 부모 후보를 대분류로 한정해 항상 대분류 아래에 둡니다.
+            var parent = parent(c, majors);
             items.get(parent == null ? c.code : parent.code).add(new CategoryItem(c.code, c.name));
         }
         return new CategoryCatalogResponse(
@@ -62,8 +63,8 @@ public class CategoryServiceImpl implements CategoryService {
                         .toList());
     }
 
-    private ProductCategory parent(ProductCategory c, List<ProductCategory> active) {
-        return active.stream()
+    private ProductCategory parent(ProductCategory c, List<ProductCategory> candidates) {
+        return candidates.stream()
                 .filter(p -> !p.code.equals(c.code) && c.code.startsWith(p.code + "_"))
                 .max(Comparator.comparingInt(p -> p.code.length()))
                 .orElse(null);

@@ -5,6 +5,8 @@ import com.msa.product.domain.category.service.CategoryService;
 import com.msa.product.global.response.ApiResponse;
 import com.msa.product.global.response.SuccessCode;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
+
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +23,8 @@ public class CategoryCatalogController {
         this.categories = categories;
     }
 
+    // 공개 API라 OpenAPI 문서에서도 전역 Bearer 인증 요구를 해제합니다.
+    @SecurityRequirements
     @GetMapping
     public ResponseEntity<ApiResponse<CategoryCatalogResponse>> catalog() {
         // 카탈로그는 마이그레이션으로만 바뀌므로 짧게 공용 캐시합니다.
