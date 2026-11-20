@@ -27,6 +27,9 @@ import java.util.*;
 @Service
 @Transactional
 public class ProductAnalysisServiceImpl implements ProductAnalysisService {
+    // 질문 기준이 바뀌면 값을 올려 같은 입력도 새로 분석합니다. 이전 지문의 질문 참조는 계속 허용합니다.
+    private static final String ANALYSIS_VERSION = "buyer-questions-v2";
+
     private final ProductRepository products;
     private final ProductImageRepository images;
     private final CategoryService categories;
@@ -67,8 +70,8 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
         if (input.images().stream().mapToLong(Image::sizeBytes).sum() > 30L * 1024 * 1024) fail();
         var catalog = categories.catalog();
         if (catalog.isEmpty()) throw new ProductException(ProductErrorCode.POLICY);
-        // 기준표 변경도 다른 분석 입력으로 취급해 기존 응답이 새 기준을 덮지 못하게 합니다.
-        String fingerprint = hash(json.writeValueAsString(List.of(input, catalog)));
+        // 기준표와 질문 기준 버전 변경도 다른 분석 입력으로 취급해 기존 응답이 새 기준을 덮지 못하게 합니다.
+        String fingerprint = fingerprint(input, catalog);
         var existing = analyses.sameInput(product, fingerprint);
         if (existing.isPresent()) return response(existing.get());
         var id = UUID.randomUUID();
@@ -122,9 +125,7 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
         // 판단 불가도 정상 결과이며 상품의 분류·승인 상태는 그대로 유지합니다.
         if (result.recommendedCategory() == null) {
             if (result.questions() == null || !result.questions().isEmpty()) fail();
-            String payload = json.writeValueAsString(result);
-            if (a.resultPayload != null && !a.resultPayload.equals(payload)) fail();
-            a.resultPayload = payload;
+            store(a, result);
             return;
         }
         var category =
@@ -132,6 +133,7 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                         .filter(c -> c.code().equals(result.recommendedCategory()))
                         .findFirst()
                         .orElseThrow(() -> new ProductException(ProductErrorCode.INVALID));
+        // 새 AI는 최대 5개를 보내지만 배포 중 들어오는 이전 결과(최대 10개)도 받습니다.
         if (result.questions() == null || result.questions().size() > 10) fail();
         var used = new HashSet<UUID>();
         var codes = new HashSet<String>();
@@ -139,17 +141,24 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
             if (q == null
                     || q.suggestionId() == null
                     || !used.add(q.suggestionId())
-                    || !codes.add(q.checkCode())
                     || blank(q.question())
                     || q.question().length() > 2000
                     || blank(q.reason())
                     || q.reason().length() > 1000
-                    || category.checks().stream().noneMatch(c -> c.code().equals(q.checkCode())))
-                fail();
+                    || (q.suggestedAnswer() != null && q.suggestedAnswer().length() > 500)) fail();
+            // 점검 코드가 있는 이전 결과만 기존처럼 추천 카테고리의 점검 항목과 중복 여부를 확인합니다.
+            if (q.checkCode() != null
+                    && (!codes.add(q.checkCode())
+                            || category.checks().stream()
+                                    .noneMatch(c -> c.code().equals(q.checkCode())))) fail();
         }
-        String payload = json.writeValueAsString(result);
-        if (a.resultPayload != null && !a.resultPayload.equals(payload)) fail();
-        a.resultPayload = payload;
+        store(a, result);
+    }
+
+    // 필드가 추가되기 전 저장한 결과도 다시 받으면 문자열이 아니라 내용으로 같은 결과인지 봅니다.
+    private void store(ProductAnalysis a, Completed result) {
+        if (a.resultPayload == null) a.resultPayload = json.writeValueAsString(result);
+        else if (!json.readValue(a.resultPayload, Completed.class).equals(result)) fail();
     }
 
     /** AI 질문 참조를 위조하거나 입력 변경 전의 질문을 새 상품 사실로 연결하지 못하게 합니다. */
@@ -177,11 +186,12 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                             requested.input().category(),
                             current.disposalReason(),
                             current.images());
-            String fingerprint =
-                    hash(
-                            json.writeValueAsString(
-                                    List.of(originalCategoryInput, categories.catalog())));
-            if (!a.fingerprint.equals(fingerprint)) continue;
+            var catalog = categories.catalog();
+            // 질문 기준 버전을 넣기 전 분석의 질문도 입력이 같으면 그대로 FAQ로 연결합니다.
+            if (!a.fingerprint.equals(fingerprint(originalCategoryInput, catalog))
+                    && !a.fingerprint.equals(
+                            hash(json.writeValueAsString(List.of(originalCategoryInput, catalog)))))
+                continue;
             if (result.questions().stream()
                     .anyMatch(
                             q ->
@@ -219,6 +229,10 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                 .fingerprint(a.fingerprint)
                 .completed(a.resultPayload != null)
                 .build();
+    }
+
+    private String fingerprint(Input input, List<Category> catalog) {
+        return hash(json.writeValueAsString(List.of(input, catalog, ANALYSIS_VERSION)));
     }
 
     private String hash(String value) {
