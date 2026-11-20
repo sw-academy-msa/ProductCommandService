@@ -42,8 +42,15 @@ public final class AiMessages {
             Input input,
             List<Category> categories) {}
 
+    // checkCode는 점검 항목에 묶던 이전 결과에만 있고 구매자 질문 결과는 null입니다.
+    // suggestedAnswer는 판매자가 확인할 예상 답변 초안이며 근거가 없으면 null입니다.
     @Builder
-    public record Question(UUID suggestionId, String checkCode, String question, String reason) {}
+    public record Question(
+            UUID suggestionId,
+            String checkCode,
+            String question,
+            String reason,
+            String suggestedAnswer) {}
 
     /** AI 결과 구분입니다. AI 계약과 같은 이름을 사용하며 모델 호출 실패는 결과로 오지 않습니다. */
     public enum Outcome {
