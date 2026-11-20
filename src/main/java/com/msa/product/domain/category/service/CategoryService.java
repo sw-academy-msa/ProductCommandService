@@ -1,6 +1,7 @@
 package com.msa.product.domain.category.service;
 
 import com.msa.product.domain.analysis.dto.response.AiMessages.Category;
+import com.msa.product.domain.category.dto.response.CategoryCatalogResponse;
 
 import java.util.List;
 
@@ -11,4 +12,6 @@ public interface CategoryService {
     boolean allowed(String name);
 
     List<Category> catalog();
+
+    CategoryCatalogResponse publicCatalog();
 }
