@@ -87,6 +87,25 @@ class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
     }
 
     @Test
+    // 실패한 지문은 캐시로 재사용하지 않고 새 요청을 만들되 이전 실패 이벤트 중복은 허용합니다.
+    void failedSameInputCreatesNewRequestAndLateDuplicateDoesNotAffectIt() {
+        var first = service.request(seller, product, version());
+        String raw = json.writeValueAsString(Map.of(
+                "requestId", first.requestId(), "productId", product, "sellerId", seller,
+                "fingerprint", first.fingerprint(), "outcome", "FAILED",
+                "failureCode", "AI_ANALYSIS_ATTEMPTS_EXHAUSTED", "questions", List.of()));
+        service.complete(json.readValue(raw, Completed.class));
+        var second = service.request(seller, product, version());
+        assertThat(second.requestId()).isNotEqualTo(first.requestId());
+        assertThat(second.fingerprint()).isEqualTo(first.fingerprint());
+        assertThat(second.completed()).isFalse();
+        service.complete(json.readValue(raw, Completed.class));
+        assertThat(analyses.findById(first.requestId()).orElseThrow().resultPayload).contains("FAILED");
+        assertThat(analyses.findById(second.requestId()).orElseThrow().resultPayload).isNull();
+        assertThat(service.request(seller, product, version()).requestId()).isEqualTo(second.requestId());
+    }
+
+    @Test
     void categoryMigrationProvidesFixedCriteria() {
         assertThat(categories.names())
                 .hasSize(255)
