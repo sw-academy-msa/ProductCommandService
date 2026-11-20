@@ -8,6 +8,7 @@ import com.msa.product.domain.inquiry.exception.InquiryErrorCode;
 import com.msa.product.domain.inquiry.exception.InquiryException;
 import com.msa.product.domain.inquiry.repository.ProductInquiryRepository;
 import com.msa.product.domain.outbox.service.ProjectionOutboxService;
+import com.msa.product.domain.notification.service.BusinessNoticeService;
 import com.msa.product.domain.product.entity.*;
 import com.msa.product.domain.product.repository.ProductRepository;
 
@@ -25,16 +26,19 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
     private final ProductInquiryRepository inquiries;
     private final Clock clock;
     private final ProjectionOutboxService outbox;
+    private final BusinessNoticeService notices;
 
     public ProductInquiryCommandServiceImpl(
             ProductRepository products,
             ProductInquiryRepository inquiries,
             Clock clock,
-            ProjectionOutboxService outbox) {
+            ProjectionOutboxService outbox,
+            BusinessNoticeService notices) {
         this.products = products;
         this.inquiries = inquiries;
         this.clock = clock;
         this.outbox = outbox;
+        this.notices = notices;
     }
 
     public InquiryResponse create(UUID buyer, UUID product, Create request) {
@@ -55,6 +59,11 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
                                 .now(clock.instant())
                                 .build());
         outbox.inquiryChanged(inquiry);
+        // 문의 자체의 버전을 사용하므로 상품 심사 알림의 버전과 충돌하지 않습니다.
+        if (p.sellerId != null && !p.sellerId.equals(buyer)) {
+            notices.enqueue(p.sellerId, "PRODUCT_INQUIRY_CREATED", inquiry.id, inquiry.version,
+                    "SELLER_PRODUCT_INQUIRY", inquiry.id, product, null);
+        }
         return InquiryResponse.from(inquiry);
     }
 
@@ -71,6 +80,8 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
         if (i.version != request.expectedVersion() || p.status == Product.Status.IN_REVIEW) {
             throw new InquiryException(InquiryErrorCode.STATE);
         }
+        // 동일 답변의 재저장이나 FAQ 공개 설정만 바꿀 때는 구매자를 다시 알리지 않습니다.
+        boolean answerChanged = !java.util.Objects.equals(i.answer, request.answer().trim());
         i.answer = request.answer().trim();
         i.answeredBy = seller;
         i.answeredAt = clock.instant();
@@ -103,6 +114,10 @@ public class ProductInquiryCommandServiceImpl implements ProductInquiryCommandSe
         }
         inquiries.flush();
         outbox.inquiryChanged(i);
+        if (answerChanged && !seller.equals(i.buyerId)) {
+            notices.enqueue(i.buyerId, "PRODUCT_INQUIRY_ANSWERED", i.id, i.version,
+                    "PRODUCT_INQUIRY", i.id, product, null);
+        }
         if (request.publishToFaq()) {
             outbox.productChanged(p);
         }

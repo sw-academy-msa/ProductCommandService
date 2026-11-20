@@ -101,6 +101,29 @@ class BusinessNoticeOutboxIntegrationTest extends ProductDatabaseTestSupport {
         assertThat(outbox.findById(id(account, aggregate))).isEmpty();
     }
 
+    /** 문의 이벤트도 같은 트랜잭션 Outbox에서 수신자와 이동 정보를 보존합니다. */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "PRODUCT_INQUIRY_CREATED, SELLER_PRODUCT_INQUIRY",
+        "PRODUCT_INQUIRY_ANSWERED, PRODUCT_INQUIRY"
+    })
+    void inquiryEventPreservesRoutingAndDeduplicates(String kind, String target) {
+        UUID account = UUID.randomUUID(), inquiry = UUID.randomUUID(), product = UUID.randomUUID();
+        new TransactionTemplate(manager).executeWithoutResult(s -> {
+            notices.enqueue(account, kind, inquiry, 1, target, inquiry, product, null);
+            notices.enqueue(account, kind, inquiry, 1, target, inquiry, product, null);
+        });
+        UUID eventId = UUID.nameUUIDFromBytes(("PRODUCT:" + kind + ":" + inquiry + ":1:" + account)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var row = outbox.findById(eventId).orElseThrow();
+        var event = json.readValue(row.payload, BusinessNotice.class);
+        assertThat(event.targetId()).isEqualTo(inquiry);
+        assertThat(event.relatedId()).isEqualTo(product);
+        assertThat(event.targetType()).isEqualTo(target);
+        assertThat(event.accountId()).isEqualTo(account);
+        assertThat(row.payload).doesNotContain("question", "answer");
+    }
+
     @Test
     void cannotEmitOutsideBusinessTransaction() {
         assertThatThrownBy(
