@@ -87,6 +87,9 @@ public class SecurityConfig {
                             // 내부 재고 계약을 판매자·구매자 토큰만으로 호출할 수 없게 합니다.
                             auth.requestMatchers("/internal/**")
                                     .hasAuthority("SCOPE_product.stock");
+                            // 구매자 홈 카테고리 탭은 로그인 없이 GET만 엽니다.
+                            auth.requestMatchers(HttpMethod.GET, "/api/v1/category-catalog")
+                                    .permitAll();
                             auth.requestMatchers(HttpMethod.POST, "/api/v1/products/*/inquiries")
                                     .hasRole("BUYER");
                             // 실제 컨트롤러와 메서드 보안에서도 동일 권한을 확인합니다.
