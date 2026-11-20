@@ -392,53 +392,75 @@ class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
         assertThat(analyses.findById(request.requestId()).orElseThrow().resultPayload).isNull();
     }
 
-    /** 질문 기준 버전이 지문에 들어가 새 분석을 받고, 버전 전 분석의 질문 참조도 그대로 허용합니다. */
+    /** 질문 기준 버전 v3가 지문에 들어가 새 분석을 받고, v2와 버전 전 분석의 질문 참조도 그대로 허용합니다. */
     @Test
-    void fingerprintIncludesQuestionVersionAndLegacyAnalysisStillVerifies() throws Exception {
+    void fingerprintIncludesQuestionVersionAndPreviousAnalysesStillVerify() throws Exception {
         var request = service.request(seller, product, version());
         var payload = analyses.findById(request.requestId()).orElseThrow().requestPayload;
         var requested = json.readValue(payload, Requested.class);
-        var bytes =
-                json.writeValueAsString(List.of(requested.input(), requested.categories()))
-                        .getBytes(StandardCharsets.UTF_8);
+        var digest = MessageDigest.getInstance("SHA-256");
         String legacy =
-                HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        assertThat(request.fingerprint()).isNotEqualTo(legacy);
-        var id = UUID.randomUUID();
-        var question =
-                new Question(
-                        UUID.randomUUID(), "CLOTHING_MATERIAL", "소재를 알려주세요.", "설명에 없습니다.", null);
-        tx.executeWithoutResult(
-                s -> {
-                    var old =
-                            ProductAnalysis.builder()
-                                    .id(id)
-                                    .productId(product)
-                                    .sellerId(seller)
-                                    .fingerprint(legacy)
-                                    .requestPayload(payload)
-                                    .createdAt(Instant.now())
-                                    .build();
-                    old.resultPayload =
-                            json.writeValueAsString(
-                                    new Completed(
-                                            id,
-                                            product,
-                                            seller,
-                                            legacy,
-                                            Outcome.RECOMMENDED,
-                                            "CLOTHING",
-                                            List.of(question)));
-                    analyses.save(old);
-                });
-        var saved =
-                registration.addFaq(
-                        seller,
-                        product,
-                        version(),
-                        new RegistrationRequests.Faq(
-                                null, question.question(), "면입니다.", true, question.suggestionId()));
-        assertThat(saved.faqs()).hasSize(1);
+                HexFormat.of()
+                        .formatHex(
+                                digest.digest(
+                                        json.writeValueAsString(
+                                                        List.of(
+                                                                requested.input(),
+                                                                requested.categories()))
+                                                .getBytes(StandardCharsets.UTF_8)));
+        String v2 =
+                HexFormat.of()
+                        .formatHex(
+                                digest.digest(
+                                        json.writeValueAsString(
+                                                        List.of(
+                                                                requested.input(),
+                                                                requested.categories(),
+                                                                "buyer-questions-v2"))
+                                                .getBytes(StandardCharsets.UTF_8)));
+        assertThat(request.fingerprint()).isNotEqualTo(legacy).isNotEqualTo(v2);
+        int n = 0;
+        for (var old : List.of(legacy, v2)) {
+            var id = UUID.randomUUID();
+            var question =
+                    new Question(
+                            UUID.randomUUID(), null, "흠집이 있나요? " + n++, "사진 근거", null);
+            tx.executeWithoutResult(
+                    s -> {
+                        var analysis =
+                                ProductAnalysis.builder()
+                                        .id(id)
+                                        .productId(product)
+                                        .sellerId(seller)
+                                        .fingerprint(old)
+                                        .requestPayload(payload)
+                                        .createdAt(Instant.now())
+                                        .build();
+                        analysis.resultPayload =
+                                json.writeValueAsString(
+                                        new Completed(
+                                                id,
+                                                product,
+                                                seller,
+                                                old,
+                                                Outcome.RECOMMENDED,
+                                                "CLOTHING",
+                                                List.of(question)));
+                        analyses.save(analysis);
+                    });
+            var saved =
+                    registration.addFaq(
+                            seller,
+                            product,
+                            version(),
+                            new RegistrationRequests.Faq(
+                                    null,
+                                    question.question(),
+                                    "작은 흠집이 있습니다.",
+                                    true,
+                                    question.suggestionId()));
+            assertThat(saved.faqs()).hasSize(n);
+        }
     }
 
     @Test
