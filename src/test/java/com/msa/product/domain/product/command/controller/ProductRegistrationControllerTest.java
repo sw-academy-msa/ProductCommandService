@@ -46,7 +46,22 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
     @Autowired TransactionTemplate tx;
     @Autowired MutableClock clock;
     @MockitoBean SellerEligibilityService account;
+    // 업무 조회 통합 테스트에서는 Account 자격 확인만 대체합니다. JWT 역할 검사는 실제 보안 체인을 사용합니다.
+    @MockitoBean com.msa.product.domain.product.command.service.AdminEligibilityService adminEligibility;
     UUID seller, product;
+
+    @Test
+    // 동일한 기존 ADMIN 토큰도 Account의 자격 확인이 거부로 바뀌면 DB 심사 목록에 접근할 수 없습니다.
+    void existingAdminTokenIsDeniedAfterAccountEligibilityChanges() throws Exception {
+        var admin = jwt().jwt(j -> j.subject(UUID.randomUUID().toString()))
+                .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
+        mvc.perform(get("/api/v1/admin/product-reviews").with(admin)).andExpect(status().isOk());
+        when(adminEligibility.isCurrentAdmin(anyString())).thenReturn(false);
+        mvc.perform(get("/api/v1/admin/product-reviews").with(admin)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/admin/product-reviews/" + product + "/decisions").with(admin)
+                .contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden());
+    }
 
     /** 등록 메타데이터는 원시 배열 대신 이름 있는 응답 DTO로 직렬화합니다. */
     @Test
@@ -65,6 +80,7 @@ class ProductRegistrationControllerTest extends ProductDatabaseTestSupport {
     void setup() {
         clock.set(Instant.parse("2030-01-01T00:00:00Z"));
         reset(account);
+        when(adminEligibility.isCurrentAdmin(anyString())).thenReturn(true);
         seller = UUID.randomUUID();
         product = commands.create(seller).id();
         when(account.shipping(anyString(), any(UUID.class)))

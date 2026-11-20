@@ -50,6 +50,8 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
     @Autowired JsonMapper json;
     @Autowired MockMvc mvc;
     @MockitoBean SellerEligibilityService account;
+    // 수정안 업무 전이와 별도로 현재 관리자 자격은 HTTP 경계 테스트에서 검증합니다.
+    @MockitoBean com.msa.product.domain.product.command.service.AdminEligibilityService adminEligibility;
     UUID seller;
     UUID product;
     UUID image;
@@ -60,6 +62,7 @@ class ProductRevisionServiceImplTest extends ProductDatabaseTestSupport {
         clock.set(now);
         seller = UUID.randomUUID();
         reset(account);
+        when(adminEligibility.isCurrentAdmin(anyString())).thenReturn(true);
         tx.executeWithoutResult(
                 s -> {
                     var p = Product.builder().sellerId(seller).build();

@@ -36,6 +36,10 @@ class SecurityConfigTest {
     @MockitoBean
     com.msa.product.domain.product.command.service.SellerEligibilityService sellerEligibility;
 
+    // 관리자 자격은 Account HTTP 경계 대역으로 제어하고 JWT만으로 허용하지 않는지 검증합니다.
+    @MockitoBean
+    com.msa.product.domain.product.command.service.AdminEligibilityService adminEligibility;
+
     @Test
     void rejectsAnonymousWithTraceId() throws Exception {
         mvc.perform(post("/api/v1/seller/products").header("X-Request-Id", "request-123"))
@@ -113,11 +117,28 @@ class SecurityConfigTest {
     @Test
     void acceptsAdminOnProductReviewSecurityProbe() throws Exception {
         when(decoder.decode("admin-token")).thenReturn(jwt("admin-token", "ADMIN"));
+        when(adminEligibility.isCurrentAdmin("admin-token")).thenReturn(true);
         mvc.perform(
                         get("/api/v1/admin/product-reviews")
                                 .header("Authorization", "Bearer admin-token"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("security-probe"));
+    }
+
+    @Test
+    void rejectsSameAdminTokenAfterAccountRevocationOrSuspension() throws Exception {
+        when(decoder.decode("existing-admin")).thenReturn(jwt("existing-admin", "ADMIN"));
+        when(adminEligibility.isCurrentAdmin("existing-admin")).thenReturn(true, false, false);
+        mvc.perform(get("/api/v1/admin/product-reviews").header("Authorization", "Bearer existing-admin"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/product-reviews").header("Authorization", "Bearer existing-admin"))
+                .andExpect(status().isForbidden());
+        // 하위 수정안 결정도 컨트롤러 호출 전에 같은 공통 경계에서 거부해야 합니다.
+        mvc.perform(post("/api/v1/admin/product-reviews/any/revisions/any/decisions")
+                        .header("Authorization", "Bearer existing-admin"))
+                .andExpect(status().isForbidden());
+        org.mockito.Mockito.verify(adminEligibility, org.mockito.Mockito.times(3))
+                .isCurrentAdmin("existing-admin");
     }
 
     @Test

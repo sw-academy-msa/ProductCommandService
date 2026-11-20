@@ -45,12 +45,15 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     @Autowired TransactionTemplate tx;
     @Autowired MutableClock clock;
     @MockitoBean SellerEligibilityService eligibility;
+    // 업무 전이 통합 테스트는 Account 경계를 대체하고 실제 HTTP 거부는 별도 보안 테스트에서 검증합니다.
+    @MockitoBean AdminEligibilityService adminEligibility;
     UUID seller = UUID.randomUUID();
 
     @BeforeEach
     void setup() {
         clock.set(Instant.parse("2030-01-01T00:00:00Z"));
         reset(eligibility);
+        when(adminEligibility.isCurrentAdmin(anyString())).thenReturn(true);
         when(eligibility.shipping(anyString(), any(UUID.class)))
                 .thenAnswer(
                         call ->
