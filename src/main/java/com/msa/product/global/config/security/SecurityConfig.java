@@ -1,6 +1,8 @@
 package com.msa.product.global.config.security;
 
 import com.msa.product.global.error.*;
+import com.msa.product.domain.product.command.service.AdminEligibilityService;
+import org.springframework.security.authorization.AuthorizationDecision;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
@@ -24,7 +26,8 @@ import java.io.IOException;
 public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
-            HttpSecurity http, ObjectMapper mapper, Environment environment) throws Exception {
+            HttpSecurity http, ObjectMapper mapper, Environment environment,
+            AdminEligibilityService adminEligibility) throws Exception {
         var authorities = new JwtGrantedAuthoritiesConverter();
         authorities.setAuthoritiesClaimName("roles");
         authorities.setAuthorityPrefix("ROLE_");
@@ -90,11 +93,16 @@ public class SecurityConfig {
                             auth.requestMatchers(
                                             "/api/v1/seller/products", "/api/v1/seller/products/**")
                                     .hasRole("SELLER");
-                            // 상품 검사는 Account 입점 심사와 별개이며 Product에서도 ADMIN 경계를 재검증합니다.
-                            auth.requestMatchers(
-                                            "/api/v1/admin/product-reviews",
-                                            "/api/v1/admin/product-reviews/**")
-                                    .hasRole("ADMIN");
+                            // Gateway 통과 여부와 관계없이 모든 관리자 요청의 현재 Account 자격을 재검증합니다.
+                            auth.requestMatchers("/api/v1/admin/**")
+                                    .access((authentication, context) -> {
+                                        var current = authentication.get();
+                                        boolean allowed = current instanceof JwtAuthenticationToken token
+                                                && current.getAuthorities().stream()
+                                                        .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()))
+                                                && adminEligibility.isCurrentAdmin(token.getToken().getTokenValue());
+                                        return new AuthorizationDecision(allowed);
+                                    });
                             auth.anyRequest().authenticated();
                         })
                 .oauth2ResourceServer(
