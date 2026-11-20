@@ -125,9 +125,7 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
         // 판단 불가도 정상 결과이며 상품의 분류·승인 상태는 그대로 유지합니다.
         if (result.recommendedCategory() == null) {
             if (result.questions() == null || !result.questions().isEmpty()) fail();
-            String payload = json.writeValueAsString(result);
-            if (a.resultPayload != null && !a.resultPayload.equals(payload)) fail();
-            a.resultPayload = payload;
+            store(a, result);
             return;
         }
         var category =
@@ -154,9 +152,13 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
                             || category.checks().stream()
                                     .noneMatch(c -> c.code().equals(q.checkCode())))) fail();
         }
-        String payload = json.writeValueAsString(result);
-        if (a.resultPayload != null && !a.resultPayload.equals(payload)) fail();
-        a.resultPayload = payload;
+        store(a, result);
+    }
+
+    // 필드가 추가되기 전 저장한 결과도 다시 받으면 문자열이 아니라 내용으로 같은 결과인지 봅니다.
+    private void store(ProductAnalysis a, Completed result) {
+        if (a.resultPayload == null) a.resultPayload = json.writeValueAsString(result);
+        else if (!json.readValue(a.resultPayload, Completed.class).equals(result)) fail();
     }
 
     /** AI 질문 참조를 위조하거나 입력 변경 전의 질문을 새 상품 사실로 연결하지 못하게 합니다. */

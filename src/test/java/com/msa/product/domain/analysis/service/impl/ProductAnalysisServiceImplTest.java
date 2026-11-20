@@ -357,6 +357,11 @@ class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
         service.complete(json.readValue(raw, Completed.class));
         assertThat(analyses.findById(request.requestId()).orElseThrow().resultPayload)
                 .contains("CLOTHING_MATERIAL");
+        // 예상 답변 필드가 없던 저장 형식으로 남은 결과를 다시 받아도 같은 결과로 처리합니다.
+        tx.executeWithoutResult(
+                s -> analyses.findById(request.requestId()).orElseThrow().resultPayload = raw);
+        service.complete(json.readValue(raw, Completed.class));
+        assertThat(analyses.findById(request.requestId()).orElseThrow().resultPayload).isEqualTo(raw);
     }
 
     /** 긴 예상 답변, 중복 질문 id, 기준표 밖 점검 코드는 저장하지 않습니다. */
