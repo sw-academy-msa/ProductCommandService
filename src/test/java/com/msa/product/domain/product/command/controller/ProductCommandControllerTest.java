@@ -170,33 +170,47 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
         var pool = java.util.concurrent.Executors.newFixedThreadPool(3);
         var ready = new java.util.concurrent.CountDownLatch(3);
         var waiting = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+        var lockTag = "draft-delete-" + UUID.randomUUID();
         try {
             tx.executeWithoutResult(s -> {
                 products.lock(id).orElseThrow();
                 draftDeletion.delete(seller, id);
-                waiting.add(pool.submit(() -> {
+                waiting.add(pool.submit(() -> tx.executeWithoutResult(worker -> {
+                    jdbc.queryForObject("select set_config('application_name', ?, true)", String.class, lockTag);
                     ready.countDown();
                     assertThatThrownBy(() -> imageService.issue(seller, id,
                             new com.msa.product.domain.image.command.dto.request.ImageUploadRequest("image/png", 16)))
                             .isInstanceOf(com.msa.product.global.error.BusinessException.class);
-                }));
-                waiting.add(pool.submit(() -> {
+                    worker.setRollbackOnly();
+                })));
+                waiting.add(pool.submit(() -> tx.executeWithoutResult(worker -> {
+                    jdbc.queryForObject("select set_config('application_name', ?, true)", String.class, lockTag);
                     ready.countDown();
                     assertThatThrownBy(() -> commands.submit(seller, id, 0))
                             .isInstanceOf(com.msa.product.domain.product.exception.ProductException.class);
-                }));
-                waiting.add(pool.submit(() -> {
+                    worker.setRollbackOnly();
+                })));
+                waiting.add(pool.submit(() -> tx.executeWithoutResult(worker -> {
+                    jdbc.queryForObject("select set_config('application_name', ?, true)", String.class, lockTag);
                     ready.countDown();
                     analysisService.complete(new com.msa.product.domain.analysis.dto.response.AiMessages.Completed(
                             UUID.randomUUID(), id, seller, "fingerprint",
                             com.msa.product.domain.analysis.dto.response.AiMessages.Outcome.FAILED,
                             null, List.of(), "AI_ANALYSIS_ATTEMPTS_EXHAUSTED"));
-                }));
+                })));
                 try {
                     assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-                    for (var task : waiting)
-                        assertThatThrownBy(() -> task.get(100, java.util.concurrent.TimeUnit.MILLISECONDS))
-                                .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                    // 스레드 시작 신호가 아니라 실제 상품 잠금 대기 세 건을 확인한 뒤 커밋합니다.
+                    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+                    long blocked = 0;
+                    while (System.nanoTime() < deadline) {
+                        jdbc.execute("select pg_stat_clear_snapshot()");
+                        blocked = jdbc.queryForObject("select count(*) from pg_stat_activity where application_name=?"
+                                + " and wait_event_type='Lock' and query like '%products%'", Long.class, lockTag);
+                        if (blocked == 3) break;
+                        Thread.sleep(10);
+                    }
+                    assertThat(blocked).as("상품 잠금에서 대기하는 업로드, 제출, 분석").isEqualTo(3);
                 } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
             });
             for (var task : waiting) task.get(10, java.util.concurrent.TimeUnit.SECONDS);
