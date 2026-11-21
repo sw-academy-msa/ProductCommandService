@@ -14,7 +14,7 @@ class CategoryMigrationTest {
         try (var db = new PostgreSQLContainer("postgres:17-alpine")) {
             db.start();
             var flyway = flyway(db).load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(4);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
             assertThat(count(db, "select count(*) from product.product_categories"))
                     .isEqualTo(255);
@@ -29,7 +29,7 @@ class CategoryMigrationTest {
             db.start();
             assertThat(flyway(db).target("2").load().migrate().migrationsExecuted).isEqualTo(2);
             var upgrade = flyway(db).load();
-            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(2);
+            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(3);
             assertThat(upgrade.migrate().migrationsExecuted).isZero();
             assertThat(
                             count(

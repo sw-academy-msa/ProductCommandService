@@ -44,6 +44,7 @@ import java.util.*;
 class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
     @Autowired ProductAnalysisService service;
     @Autowired ProductCommandService commands;
+    @Autowired ProductDraftDeleteService draftDeletion;
     @Autowired ProductRegistrationService registration;
     @Autowired ProductRepository products;
     @Autowired ProductImageRepository images;
@@ -80,6 +81,24 @@ class ProductAnalysisServiceImplTest extends ProductDatabaseTestSupport {
                     image.attached = true;
                     images.save(image);
                 });
+    }
+
+    @Test
+    void deletedDraftRemovesPendingRequestAndIgnoresLateSuccessAndFailure() {
+        var request = service.request(seller, product, version());
+        var saved = analyses.findAll().stream().filter(a -> a.productId.equals(product)).findFirst().orElseThrow();
+        var requestId = saved.id;
+        draftDeletion.delete(seller, product);
+        assertThat(analyses.findById(requestId)).isEmpty();
+        assertThat(outbox.findById(requestId)).isEmpty();
+        assertThatCode(() -> service.complete(new Completed(requestId, product, seller, saved.fingerprint,
+                Outcome.RECOMMENDED, "clothing", List.of(), null))).doesNotThrowAnyException();
+        assertThatCode(() -> service.complete(new Completed(requestId, product, seller, saved.fingerprint,
+                Outcome.FAILED, null, List.of(), "AI_ANALYSIS_ATTEMPTS_EXHAUSTED"))).doesNotThrowAnyException();
+        assertThat(analyses.findById(requestId)).isEmpty();
+        assertThatThrownBy(() -> service.complete(new Completed(requestId, UUID.randomUUID(), seller,
+                saved.fingerprint, Outcome.FAILED, null, List.of(), "AI_ANALYSIS_ATTEMPTS_EXHAUSTED")))
+                .isInstanceOf(ProductException.class);
     }
 
     long version() {

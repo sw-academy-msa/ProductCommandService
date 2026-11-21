@@ -26,6 +26,7 @@ import java.util.*;
 class ProductImageServiceImplTest {
     ProductRepository products;
     ProductImageRepository images;
+    com.msa.product.domain.product.repository.ProductDraftDeletionRepository deletions;
     S3Client s3;
     ProductImageServiceImpl service;
     Product p;
@@ -36,6 +37,7 @@ class ProductImageServiceImplTest {
     void setup() {
         products = mock(ProductRepository.class);
         images = mock(ProductImageRepository.class);
+        deletions = mock(com.msa.product.domain.product.repository.ProductDraftDeletionRepository.class);
         s3 = mock(S3Client.class);
         var policy =
                 new ImageStorageProperties(
@@ -49,6 +51,7 @@ class ProductImageServiceImplTest {
         service =
                 new ProductImageServiceImpl(
                         products,
+                        deletions,
                         images,
                         policy,
                         s3,
@@ -175,6 +178,28 @@ class ProductImageServiceImplTest {
         assertThat(result.representative()).isTrue();
         verify(s3, times(1))
                 .copyObject(argThat((CopyObjectRequest r) -> "v1".equals(r.copySourceIfMatch())));
+    }
+
+    @Test
+    void deletedImageRemainsRetryableOnStorageFailureAndEvidenceIsNeverDeleted() {
+        when(images.findProductId(image.id)).thenReturn(Optional.of(p.id));
+        when(products.lock(p.id)).thenReturn(Optional.empty());
+        when(deletions.lock(p.id)).thenReturn(Optional.of(new com.msa.product.domain.product.entity.ProductDraftDeletion(p.id, p.sellerId, now)));
+        image.expiresAt = now.minus(Duration.ofHours(25));
+        when(s3.deleteObject(any(DeleteObjectRequest.class))).thenThrow(S3Exception.builder().statusCode(503).build());
+        assertThatThrownBy(() -> service.cleanup(image.id)).isInstanceOf(S3Exception.class);
+        verify(images, never()).delete(any(ProductImage.class));
+        assertThat(image.storageCleaned).isFalse();
+        reset(s3);
+        service.cleanup(image.id);
+        verify(images).delete(image);
+        reset(s3, images);
+        when(images.findProductId(image.id)).thenReturn(Optional.of(p.id));
+        when(images.findById(image.id)).thenReturn(Optional.of(image));
+        image.revisionReferenced = true;
+        service.cleanup(image.id);
+        verifyNoInteractions(s3);
+        verify(images, never()).delete(any(ProductImage.class));
     }
 
     @Test

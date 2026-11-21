@@ -8,6 +8,7 @@ import com.msa.product.domain.image.exception.ImageErrorCode;
 import com.msa.product.domain.image.exception.ImageException;
 import com.msa.product.domain.image.repository.ProductImageRepository;
 import com.msa.product.domain.product.repository.ProductRepository;
+import com.msa.product.domain.product.repository.ProductDraftDeletionRepository;
 import com.msa.product.global.config.storage.ImageStorageProperties;
 
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ import java.util.*;
 @Transactional
 public class ProductImageServiceImpl implements ProductImageService {
     private final ProductRepository products;
+    private final ProductDraftDeletionRepository deletions;
     private final ProductImageRepository images;
     private final ImageStorageProperties policy;
     private final S3Client s3;
@@ -35,12 +37,14 @@ public class ProductImageServiceImpl implements ProductImageService {
 
     public ProductImageServiceImpl(
             ProductRepository products,
+            ProductDraftDeletionRepository deletions,
             ProductImageRepository images,
             ImageStorageProperties policy,
             S3Client s3,
             S3Presigner presigner,
             Clock clock) {
         this.products = products;
+        this.deletions = deletions;
         this.images = images;
         this.policy = policy;
         this.s3 = s3;
@@ -263,12 +267,13 @@ public class ProductImageServiceImpl implements ProductImageService {
         if (!policy.ready()) {
             return;
         }
-        UUID productId =
-                images.findProductId(id)
-                        .orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
-        products.lock(productId).orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
-        var image =
-                images.findById(id).orElseThrow(() -> new ImageException(ImageErrorCode.NOT_FOUND));
+        UUID productId = images.findProductId(id).orElse(null);
+        if (productId == null) return;
+        boolean deleted = products.lock(productId).isEmpty();
+        // 삭제 기록 잠금으로 여러 정리 작업이 같은 이미지의 행을 동시에 지우지 않게 합니다.
+        if (deleted && deletions.lock(productId).isEmpty()) return;
+        var image = images.findById(id).orElse(null);
+        if (image == null) return;
         if (Boolean.TRUE.equals(image.revisionReferenced)) {
             // 제출·심사 이력의 증거 객체는 미사용 이미지 만료 대상으로 취급하지 않습니다.
             return;
@@ -287,7 +292,8 @@ public class ProductImageServiceImpl implements ProductImageService {
                             .key("product-images/" + productId + "/" + id)
                             .build());
         }
-        image.storageCleaned = true;
+        if (deleted) images.delete(image);
+        else image.storageCleaned = true;
     }
 
     private ProductImage owned(UUID seller, UUID product, UUID id) {

@@ -1,5 +1,7 @@
 # Product Command API 계약
 
+초안 삭제의 요청, 멱등성, 오류와 비동기 이미지 정리는 [draft-delete.md](draft-delete.md)를 참고합니다.
+
 실제 컨트롤러와 DTO가 계약의 기준이며 `product-command.openapi.json`은 Swagger 생성 결과의 검토용 스냅샷입니다.
 경로·요청·응답 변경 후 `./gradlew.bat test bootJar`로 검증하고 `build/generated/product-command.openapi.json`과 비교해 갱신합니다.
 실제 토큰·서명 URL·계정 정보는 이 디렉토리에 저장하지 않습니다.
