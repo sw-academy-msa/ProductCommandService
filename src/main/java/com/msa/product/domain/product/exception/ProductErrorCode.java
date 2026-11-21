@@ -7,6 +7,8 @@ import org.springframework.http.HttpStatus;
 
 /** 상품 등록·심사·편집·판매자 자격 오류입니다. 기존 PRODUCT_* 응답 계약과 메시지를 유지하고 입력값은 포함하지 않습니다. */
 public enum ProductErrorCode implements ErrorCode {
+    DRAFT_DELETE_NOT_ALLOWED(HttpStatus.CONFLICT, "PRODUCT_DRAFT_DELETE_NOT_ALLOWED", "초안 상품만 삭제할 수 있습니다."),
+    DRAFT_DELETE_PROTECTED(HttpStatus.CONFLICT, "PRODUCT_DRAFT_DELETE_PROTECTED", "제출 또는 심사 증거가 있는 상품은 삭제할 수 없습니다."),
     NOT_FOUND(HttpStatus.NOT_FOUND, "PRODUCT_NOT_FOUND", "대상을 찾을 수 없습니다."),
     NOT_OWNER(HttpStatus.FORBIDDEN, "PRODUCT_NOT_OWNER", "본인 상품만 변경할 수 있습니다."),
     INVALID(HttpStatus.BAD_REQUEST, "PRODUCT_INVALID", "상품 입력 또는 옵션 구성이 올바르지 않습니다."),

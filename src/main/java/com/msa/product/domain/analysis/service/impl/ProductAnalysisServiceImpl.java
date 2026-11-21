@@ -27,6 +27,7 @@ import java.util.*;
 @Service
 @Transactional
 public class ProductAnalysisServiceImpl implements ProductAnalysisService {
+    private final com.msa.product.domain.product.repository.ProductDraftDeletionRepository deletions;
     // 질문 기준이 바뀌면 값을 올려 같은 입력도 새로 분석합니다. 이전 지문의 질문 참조는 계속 허용합니다.
     private static final String ANALYSIS_VERSION = "buyer-questions-v3";
     // 이전 질문 기준 버전입니다. 이 버전으로 받은 질문 답도 입력이 같으면 FAQ로 저장할 수 있습니다.
@@ -42,6 +43,7 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
 
     public ProductAnalysisServiceImpl(
             ProductRepository products,
+            com.msa.product.domain.product.repository.ProductDraftDeletionRepository deletions,
             ProductImageRepository images,
             CategoryService categories,
             ProductAnalysisRepository analyses,
@@ -49,6 +51,7 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
             JsonMapper json,
             Clock clock) {
         this.products = products;
+        this.deletions = deletions;
         this.images = images;
         this.categories = categories;
         this.analyses = analyses;
@@ -113,6 +116,12 @@ public class ProductAnalysisServiceImpl implements ProductAnalysisService {
 
     /** 결과는 요청 당시 기준표에 맞는 경우만 저장하며 상품 카테고리·승인 상태를 자동 변경하지 않습니다. */
     public void complete(Completed result) {
+        // 삭제와 결과 반영 모두 상품에서 분석 순서로 잠가 교착과 삭제 후 반영을 막습니다.
+        if (products.lock(result.productId()).isEmpty()) {
+            var deleted = deletions.findById(result.productId());
+            if (deleted.isPresent() && deleted.get().sellerId.equals(result.sellerId())) return;
+            throw new ProductException(ProductErrorCode.INVALID);
+        }
         var a =
                 analyses.lock(result.requestId())
                         .orElseThrow(() -> new ProductException(ProductErrorCode.INVALID));

@@ -6,8 +6,9 @@ import java.util.*;
 
 /** 이미지 소유권과 검증 완료 메타데이터는 Product DB만 관리합니다. */
 public interface ProductImageRepository extends JpaRepository<ProductImage, UUID> {
+    List<ProductImage> findByProductId(UUID productId);
     @org.springframework.data.jpa.repository.Query(
-            "select i.id from ProductImage i where i.storageCleaned = false and i.expiresAt < :cutoff order by i.expiresAt, i.id")
+            "select i.id from ProductImage i where i.storageCleaned = false and (i.revisionReferenced = false or i.revisionReferenced is null) and i.expiresAt < :cutoff order by i.expiresAt, i.id")
     List<UUID> findCleanupIds(
             java.time.Instant cutoff, org.springframework.data.domain.Pageable page);
 

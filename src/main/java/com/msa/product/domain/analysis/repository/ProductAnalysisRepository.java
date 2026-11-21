@@ -10,6 +10,9 @@ import java.util.*;
 
 /** 요청 중복은 상품 잠금과 유일 제약으로 제어하고 결과 중복은 요청 행 잠금으로 제어합니다. */
 public interface ProductAnalysisRepository extends JpaRepository<ProductAnalysis, UUID> {
+    @Modifying
+    @Query("delete from ProductAnalysis a where a.productId=:product")
+    int deleteByProductId(UUID product);
     @Query(
             "select a from ProductAnalysis a where a.productId=:product and"
                     + " a.fingerprint=:fingerprint and a.status <> 'FAILED'")

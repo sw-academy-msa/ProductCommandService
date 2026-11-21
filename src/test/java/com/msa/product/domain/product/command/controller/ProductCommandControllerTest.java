@@ -44,6 +44,10 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
     @Autowired ProductCommandService commands;
     @Autowired TransactionTemplate tx;
     @Autowired MutableClock clock;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired ProductDraftDeleteService draftDeletion;
+    @Autowired com.msa.product.domain.image.command.service.ProductImageService imageService;
+    @Autowired com.msa.product.domain.analysis.service.ProductAnalysisService analysisService;
     @MockitoBean SellerEligibilityService eligibility;
     // 업무 전이 통합 테스트는 Account 경계를 대체하고 실제 HTTP 거부는 별도 보안 테스트에서 검증합니다.
     @MockitoBean AdminEligibilityService adminEligibility;
@@ -85,6 +89,123 @@ class ProductCommandControllerTest extends ProductDatabaseTestSupport {
                         .with(seller(seller))
                         .contentType("application/json")
                         .content("{\"expectedVersion\":" + version + "," + fields + "}"));
+    }
+
+    @Test
+    void ownerCanDeleteDraftAndRepeatButOtherSellerCannot() throws Exception {
+        var id = commands.create(seller).id();
+        mvc.perform(delete("/api/v1/seller/products/" + id).with(seller(UUID.randomUUID())))
+                .andExpect(status().isForbidden());
+        mvc.perform(delete("/api/v1/seller/products/" + id).with(seller(seller)))
+                .andExpect(status().isOk());
+        assertThat(products.findById(id)).isEmpty();
+        mvc.perform(delete("/api/v1/seller/products/" + id).with(seller(seller)))
+                .andExpect(status().isOk());
+        mvc.perform(delete("/api/v1/seller/products/" + UUID.randomUUID()).with(seller(seller)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void deleteRejectsEveryNonDraftStateAndProtectsEvidence() throws Exception {
+        for (var state : List.of(Product.Status.IN_REVIEW, Product.Status.REJECTED, Product.Status.APPROVED)) {
+            var id = commands.create(seller).id();
+            tx.executeWithoutResult(s -> products.findById(id).orElseThrow().status = state);
+            mvc.perform(delete("/api/v1/seller/products/" + id).with(seller(seller)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("PRODUCT_DRAFT_DELETE_NOT_ALLOWED"));
+            assertThat(products.existsById(id)).isTrue();
+        }
+        var id = commands.create(seller).id();
+        var evidence = new ProductImage(id, seller, "image/png", 16, clock.instant().plusSeconds(300));
+        evidence.revisionReferenced = true;
+        images.save(evidence);
+        mvc.perform(delete("/api/v1/seller/products/" + id).with(seller(seller)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("PRODUCT_DRAFT_DELETE_PROTECTED"));
+        assertThat(images.existsById(evidence.id)).isTrue();
+        assertThat(products.existsById(id)).isTrue();
+    }
+
+    @Test
+    void deletionCascadesChildrenAndQueuesEveryImageWithoutPublicEvent() throws Exception {
+        var id = commands.create(seller).id();
+        var attached = new ProductImage(id, seller, "image/png", 16, clock.instant().plusSeconds(300));
+        attached.attached = true;
+        attached.storageCleaned = true;
+        var temporary = new ProductImage(id, seller, "image/png", 16, clock.instant().plusSeconds(300));
+        images.saveAll(List.of(attached, temporary));
+        tx.executeWithoutResult(s -> {
+            var p = products.findById(id).orElseThrow();
+            p.attributes.add(new ProductAttribute("material", "cotton"));
+            p.optionDimensions.add(new ProductOptionDimension(p, "size", List.of("M")));
+            var option = new ProductOption(p, "default", 2);
+            option.selections.put("size", "M");
+            p.options.add(option);
+            p.faqs.add(new ProductFaq(p, "question", "answer", null, seller, clock.instant()));
+        });
+        mvc.perform(delete("/api/v1/seller/products/" + id).with(seller(seller)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isEmpty());
+        assertThat(images.findByProductId(id)).hasSize(2).allSatisfy(i -> {
+            assertThat(i.attached).isFalse();
+            assertThat(i.storageCleaned).isFalse();
+        });
+        for (String table : List.of("product_options", "product_faqs", "product_attributes", "product_option_dimensions"))
+            assertThat(jdbc.queryForObject("select count(*) from product." + table + " where product_id=?", Long.class, id)).isZero();
+        assertThat(publicationOutbox.findAll()).noneMatch(e -> id.toString().equals(e.partitionKey));
+    }
+
+    @Test
+    void deleteRequiresSellerAuthentication() throws Exception {
+        var id = commands.create(seller).id();
+        mvc.perform(delete("/api/v1/seller/products/" + id)).andExpect(status().isUnauthorized());
+        mvc.perform(delete("/api/v1/seller/products/" + id)
+                .with(jwt().jwt(j -> j.subject(seller.toString())).authorities(new SimpleGrantedAuthority("ROLE_BUYER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void deletionSerializesWithUploadSubmitAndLateAnalysis() throws Exception {
+        var id = commands.create(seller).id();
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(3);
+        var ready = new java.util.concurrent.CountDownLatch(3);
+        var waiting = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+        try {
+            tx.executeWithoutResult(s -> {
+                products.lock(id).orElseThrow();
+                draftDeletion.delete(seller, id);
+                waiting.add(pool.submit(() -> {
+                    ready.countDown();
+                    assertThatThrownBy(() -> imageService.issue(seller, id,
+                            new com.msa.product.domain.image.command.dto.request.ImageUploadRequest("image/png", 16)))
+                            .isInstanceOf(com.msa.product.global.error.BusinessException.class);
+                }));
+                waiting.add(pool.submit(() -> {
+                    ready.countDown();
+                    assertThatThrownBy(() -> commands.submit(seller, id, 0))
+                            .isInstanceOf(com.msa.product.domain.product.exception.ProductException.class);
+                }));
+                waiting.add(pool.submit(() -> {
+                    ready.countDown();
+                    analysisService.complete(new com.msa.product.domain.analysis.dto.response.AiMessages.Completed(
+                            UUID.randomUUID(), id, seller, "fingerprint",
+                            com.msa.product.domain.analysis.dto.response.AiMessages.Outcome.FAILED,
+                            null, List.of(), "AI_ANALYSIS_ATTEMPTS_EXHAUSTED"));
+                }));
+                try {
+                    assertThat(ready.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                    for (var task : waiting)
+                        assertThatThrownBy(() -> task.get(100, java.util.concurrent.TimeUnit.MILLISECONDS))
+                                .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+            });
+            for (var task : waiting) task.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(products.findById(id)).isEmpty();
+            assertThat(images.findByProductId(id)).isEmpty();
+        } finally {
+            pool.shutdownNow();
+            assertThat(pool.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     String options() {
