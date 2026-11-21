@@ -22,7 +22,7 @@ class AnalysisFailureMigrationTest {
                     var statement = connection.createStatement()) {
                 statement.execute("insert into product.product_analyses(id,product_id,seller_id,fingerprint,request_payload,result_payload) values ('"
                         + id + "','" + product + "','" + UUID.randomUUID() + "','" + "a".repeat(64) + "','{}','{}')");
-                assertThat(config.target("latest").load().migrate().migrationsExecuted).isEqualTo(1);
+                assertThat(config.target("latest").load().migrate().migrationsExecuted).isEqualTo(2);
                 try (var rows = statement.executeQuery("select status from product.product_analyses where id='" + id + "'")) {
                     rows.next();
                     assertThat(rows.getString(1)).isEqualTo("COMPLETED");

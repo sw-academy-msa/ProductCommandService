@@ -9,6 +9,7 @@ import java.util.*;
 
 /** 먼저 상품 행을 잠근 뒤 회차를 조회·변경하여 동시 제출과 승인 경합을 직렬화합니다. */
 public interface ProductRevisionRepository extends JpaRepository<ProductRevision, UUID> {
+    boolean existsByProductId(UUID productId);
     @Query(
             "select r from ProductRevision r where r.productId=:product order by r.submittedAt"
                     + " desc, r.id")
