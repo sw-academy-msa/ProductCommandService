@@ -42,6 +42,17 @@ public class Product {
     // 옵션만 수정되어도 편집 버전이 증가하도록 상품 변경 식별자를 함께 갱신합니다.
     public UUID changeId;
 
+    @Column(nullable = false)
+    public boolean advertisingRequested;
+
+    @Column(nullable = false)
+    public boolean advertisingSubmissionLocked;
+
+    public UUID currentAdvertisingApplicationId;
+
+    @Transient
+    public com.msa.product.domain.advertising.dto.response.AdvertisingResponse advertising;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     public Status status;
@@ -62,8 +73,7 @@ public class Product {
     public String brandOrStore;
 
     // 기존 DB의 등록 형식 컬럼 쓰기 호환만 유지합니다. API 분기나 수정 허용 여부에는 사용하지 않습니다.
-    @Deprecated
-    private int registrationFormatVersion = 1;
+    @Deprecated private int registrationFormatVersion = 1;
 
     public Instant createdAt;
     public Instant updatedAt;
@@ -153,6 +163,7 @@ public class Product {
     /** 승인된 원본은 직접 수정하지 않습니다. 판매 시작 전 변경은 별도 수정 심사 회차로 제출합니다. */
     public void requireEditable(UUID actor) {
         requireOwner(actor);
+        if (advertisingSubmissionLocked) throw new ProductException(ProductErrorCode.AD_LOCKED);
         if (status != Status.DRAFT && status != Status.REJECTED) {
             throw new ProductException(ProductErrorCode.STATE);
         }
