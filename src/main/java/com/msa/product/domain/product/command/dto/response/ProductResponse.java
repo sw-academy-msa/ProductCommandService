@@ -35,7 +35,8 @@ public record ProductResponse(
         Address dispatchAddress,
         Address returnAddress,
         Instant addressesCapturedAt,
-        List<Faq> faqs) {
+        List<Faq> faqs,
+        com.msa.product.domain.advertising.dto.response.AdvertisingResponse advertising) {
     /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
     public static class ProductResponseBuilder {
         @Override
@@ -130,6 +131,11 @@ public record ProductResponse(
 
     public static ProductResponse from(Product p) {
         return ProductResponse.builder()
+                .advertising(
+                        p.advertising == null
+                                ? com.msa.product.domain.advertising.dto.response
+                                        .AdvertisingResponse.none()
+                                : p.advertising)
                 .id(p.id)
                 .sellerId(p.sellerId)
                 .version(p.version)

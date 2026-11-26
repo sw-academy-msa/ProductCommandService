@@ -45,19 +45,28 @@ public abstract class ProductDatabaseTestSupport {
                         new org.springframework.core.io.ByteArrayResource(
                                 sql.substring(sql.indexOf("INSERT INTO"))
                                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(inserts)
-                        .execute(dataSource);
+                populate(inserts, dataSource);
                 // 테스트가 V2의 4개 분류에만 머물지 않도록 실제 추가 마이그레이션도 같은 순서로 적용합니다.
-                new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
-                                new org.springframework.core.io.ClassPathResource(
-                                        "db/migration/V3__expand_predefined_product_categories.sql"))
-                        .execute(dataSource);
-                // Hibernate가 표현할 수 없는 부분 유일 인덱스도 실제 마이그레이션과 같게 적용합니다.
-                new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
+                populate(
                         new org.springframework.core.io.ClassPathResource(
-                                "db/migration/V4__allow_retry_of_failed_analysis.sql"))
-                        .execute(dataSource);
+                                "db/migration/V3__expand_predefined_product_categories.sql"),
+                        dataSource);
+                // Hibernate가 표현할 수 없는 부분 유일 인덱스도 실제 마이그레이션과 같게 적용합니다.
+                populate(
+                        new org.springframework.core.io.ClassPathResource(
+                                "db/migration/V4__allow_retry_of_failed_analysis.sql"),
+                        dataSource);
             };
+        }
+
+        /** Windows 기본 문자셋과 관계없이 실제 UTF-8 마이그레이션을 적용합니다. */
+        private static void populate(
+                org.springframework.core.io.Resource resource, javax.sql.DataSource source) {
+            var populator =
+                    new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
+                            resource);
+            populator.setSqlScriptEncoding("UTF-8");
+            populator.execute(source);
         }
     }
 

@@ -35,7 +35,8 @@ public record ProductManagementResponse(
             String category,
             Long price,
             int totalQuantity,
-            int soldQuantity) {
+            int soldQuantity,
+            com.msa.product.domain.advertising.dto.response.AdvertisingResponse advertising) {
         /** 빌더에 담긴 입력값이 로그에 노출되지 않도록 문자열 표현을 제한합니다. */
         public static class ItemBuilder {
             @Override
@@ -46,6 +47,11 @@ public record ProductManagementResponse(
 
         public static Item from(Product p) {
             return Item.builder()
+                    .advertising(
+                            p.advertising == null
+                                    ? com.msa.product.domain.advertising.dto.response
+                                            .AdvertisingResponse.none()
+                                    : p.advertising)
                     .id(p.id)
                     .sellerId(p.sellerId)
                     .name(p.name)

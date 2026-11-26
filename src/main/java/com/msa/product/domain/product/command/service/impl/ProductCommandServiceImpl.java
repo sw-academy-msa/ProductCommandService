@@ -28,6 +28,9 @@ public class ProductCommandServiceImpl implements ProductCommandService {
     private final Clock clock;
     private final com.msa.product.domain.withdrawal.service.WithdrawalGateService withdrawal;
     private final ProjectionOutboxService outbox;
+    private final com.msa.product.domain.advertising.service.ProductSubmissionValidator
+            submissionValidator;
+    private final com.msa.product.domain.advertising.service.AdvertisingService advertising;
     private final com.msa.product.domain.product.command.service.ProductPublicationService
             publication;
 
@@ -39,7 +42,10 @@ public class ProductCommandServiceImpl implements ProductCommandService {
             CategoryService policy,
             Clock clock,
             ProjectionOutboxService outbox,
-            com.msa.product.domain.product.command.service.ProductPublicationService publication) {
+            com.msa.product.domain.product.command.service.ProductPublicationService publication,
+            com.msa.product.domain.advertising.service.ProductSubmissionValidator
+                    submissionValidator,
+            com.msa.product.domain.advertising.service.AdvertisingService advertising) {
         this.notices = notices;
         this.withdrawal = withdrawal;
         this.products = products;
@@ -48,6 +54,8 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         this.clock = clock;
         this.outbox = outbox;
         this.publication = publication;
+        this.submissionValidator = submissionValidator;
+        this.advertising = advertising;
     }
 
     public ProductResponse create(UUID seller) {
@@ -63,30 +71,12 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         Product p = locked(id);
         p.requireEditable(seller);
         version(p, expectedVersion);
-        if (policy.names().isEmpty()) {
-            throw new ProductException(ProductErrorCode.POLICY);
-        }
-        if (blank(p.name)
-                || blank(p.description)
-                || blank(p.sourceUrl)
-                || !policy.allowed(p.category)
-                || p.price == null
-                || p.price <= 0
-                || p.shippingFee == null
-                || p.shippingFee < 0
-                || p.dispatchBusinessDays == null
-                || p.dispatchBusinessDays <= 0
-                || p.perAccountLimit == null
-                || p.perAccountLimit <= 0
-                || blank(p.disposalReason)
-                || p.options.isEmpty()
-                || p.dispatchAddress == null
-                || p.returnAddress == null
-                || p.startsAt == null
-                || !p.startsAt.isAfter(clock.instant())
-                || images.countByProductIdAndAttachedTrue(p.id) == 0) {
-            throw new ProductException(ProductErrorCode.INVALID);
-        }
+        if (p.advertisingRequested && p.advertisingSubmissionLocked)
+            throw new ProductException(ProductErrorCode.AD_PAYMENT_REQUIRED);
+        // 광고 OFF 재심사는 이전 회차의 취소 복구를 유지하면서 일반 제출로 진행합니다.
+        p.advertisingRequested = false;
+        p.currentAdvertisingApplicationId = null;
+        submissionValidator.validate(p);
         p.status = Product.Status.IN_REVIEW;
         p.submittedAt = clock.instant();
         p.updatedAt = clock.instant();
@@ -110,6 +100,7 @@ public class ProductCommandServiceImpl implements ProductCommandService {
         if (!r.approved() && blank(r.reason())) {
             throw new ProductException(ProductErrorCode.INVALID);
         }
+        advertising.reviewed(p, r.approved());
         p.status = r.approved() ? Product.Status.APPROVED : Product.Status.REJECTED;
         p.reviewReason = r.reason();
         p.reviewerId = admin;
