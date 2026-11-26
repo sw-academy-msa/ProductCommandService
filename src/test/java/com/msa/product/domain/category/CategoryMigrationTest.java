@@ -14,10 +14,9 @@ class CategoryMigrationTest {
         try (var db = new PostgreSQLContainer("postgres:17-alpine")) {
             db.start();
             var flyway = flyway(db).load();
-            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);
+            assertThat(flyway.migrate().migrationsExecuted).isEqualTo(6);
             assertThat(flyway.migrate().migrationsExecuted).isZero();
-            assertThat(count(db, "select count(*) from product.product_categories"))
-                    .isEqualTo(255);
+            assertThat(count(db, "select count(*) from product.product_categories")).isEqualTo(255);
             assertThat(count(db, "select count(*) from product.category_checks")).isEqualTo(1020);
         }
     }
@@ -29,13 +28,14 @@ class CategoryMigrationTest {
             db.start();
             assertThat(flyway(db).target("2").load().migrate().migrationsExecuted).isEqualTo(2);
             var upgrade = flyway(db).load();
-            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(3);
+            assertThat(upgrade.migrate().migrationsExecuted).isEqualTo(4);
             assertThat(upgrade.migrate().migrationsExecuted).isZero();
             assertThat(
                             count(
                                     db,
                                     "select count(*) from product.product_categories where"
-                                        + " (code,name) in (('CLOTHING','의류'),('FASHION_ACCESSORIES','패션잡화'),('STATIONERY','문구'),('HOUSEHOLD','일반"
+                                        + " (code,name) in"
+                                        + " (('CLOTHING','의류'),('FASHION_ACCESSORIES','패션잡화'),('STATIONERY','문구'),('HOUSEHOLD','일반"
                                         + " 생활잡화')) and active"))
                     .isEqualTo(4);
             assertThat(

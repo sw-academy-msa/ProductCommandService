@@ -3,6 +3,11 @@ eureka:
   client:
     enabled: false
 spring:
+  # 다수의 격리 컨텍스트가 공유 PostgreSQL의 연결 한도를 소진하지 않게 합니다.
+  datasource:
+    hikari:
+      maximum-pool-size: 4
+      minimum-idle: 1
   config:
     # 테스트는 개발자의 .env를 읽지 않도록 공통 import를 대체합니다.
     import: optional:classpath:/test-overrides.properties

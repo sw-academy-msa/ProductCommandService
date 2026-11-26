@@ -22,10 +22,17 @@ import java.util.UUID;
 public class ProductEditingQueryServiceImpl implements ProductEditingQueryService {
     private final ProductRepository products;
     private final Clock clock;
+    private final com.msa.product.domain.advertising.repository.AdvertisingApplicationRepository
+            advertising;
 
-    public ProductEditingQueryServiceImpl(ProductRepository products, Clock clock) {
+    public ProductEditingQueryServiceImpl(
+            ProductRepository products,
+            Clock clock,
+            com.msa.product.domain.advertising.repository.AdvertisingApplicationRepository
+                    advertising) {
         this.clock = clock;
         this.products = products;
+        this.advertising = advertising;
     }
 
     /** 상품 관리 필터는 공개 Query 검색 API가 아니라 본인 원본 관리 작업입니다. */
@@ -107,6 +114,18 @@ public class ProductEditingQueryServiceImpl implements ProductEditingQueryServic
     }
 
     private ProductManagementResponse response(Page<Product> p) {
+        var byId =
+                new java.util.HashMap<
+                        java.util.UUID,
+                        com.msa.product.domain.advertising.entity.AdvertisingApplication>();
+        advertising
+                .findAllById(
+                        p.getContent().stream()
+                                .map(x -> x.currentAdvertisingApplicationId)
+                                .filter(java.util.Objects::nonNull)
+                                .toList())
+                .forEach(a -> byId.put(a.id, a));
+        p.getContent().forEach(x -> attach(x, byId.get(x.currentAdvertisingApplicationId)));
         return ProductManagementResponse.builder()
                 .items(p.getContent().stream().map(ProductManagementResponse.Item::from).toList())
                 .page(p.getNumber())
@@ -121,12 +140,32 @@ public class ProductEditingQueryServiceImpl implements ProductEditingQueryServic
                 products.findById(id)
                         .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND));
         p.requireOwner(seller);
+        attach(
+                p,
+                p.currentAdvertisingApplicationId == null
+                        ? null
+                        : advertising.findById(p.currentAdvertisingApplicationId).orElse(null));
         return ProductResponse.from(p);
     }
 
     public ProductResponse forReview(UUID id) {
-        return ProductResponse.from(
+        var p =
                 products.findById(id)
-                        .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND)));
+                        .orElseThrow(() -> new ProductException(ProductErrorCode.NOT_FOUND));
+        attach(
+                p,
+                p.currentAdvertisingApplicationId == null
+                        ? null
+                        : advertising.findById(p.currentAdvertisingApplicationId).orElse(null));
+        return ProductResponse.from(p);
+    }
+
+    private void attach(
+            Product p, com.msa.product.domain.advertising.entity.AdvertisingApplication a) {
+        p.advertising =
+                a == null
+                        ? com.msa.product.domain.advertising.dto.response.AdvertisingResponse.none()
+                        : com.msa.product.domain.advertising.dto.response.AdvertisingResponse.from(
+                                a);
     }
 }

@@ -72,6 +72,9 @@ server:
   # 외부 전달 헤더를 인증 사용자나 소유권의 근거로 사용하지 않습니다.
   forward-headers-strategy: none
 product:
+  advertising:
+    enabled: ${PRODUCT_ADVERTISING_ENABLED:false}
+    consumer-enabled: ${PRODUCT_ADVERTISING_CONSUMER_ENABLED:false}
   ai:
     consumer-enabled: ${PRODUCT_AI_CONSUMER_ENABLED:false}
   outbox:
