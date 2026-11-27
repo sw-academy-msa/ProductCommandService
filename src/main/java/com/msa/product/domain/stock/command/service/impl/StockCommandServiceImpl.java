@@ -102,7 +102,8 @@ public class StockCommandServiceImpl implements StockCommandService {
                         .sum();
         long requested = items.values().stream().mapToLong(Integer::longValue).sum();
         if (requested + purchased > p.perAccountLimit) {
-            fail(StockErrorCode.STOCK);
+            // 구매 한도 계산 결과를 보존하여 재고 부족과 구분합니다.
+            throw new StockException(p.perAccountLimit, (int) Math.max(0L, p.perAccountLimit - purchased));
         }
         for (var item : items.entrySet()) {
             if (option(p, item.getKey()).available() < item.getValue()) {

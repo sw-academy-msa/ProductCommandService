@@ -127,10 +127,38 @@ class StockCommandServiceImplTest extends ProductDatabaseTestSupport {
     }
 
     @Test
+    void purchaseLimitIsDistinctFromStockAndIncludesRemainingQuantity() {
+        // 서로 다른 옵션 구매량도 합산하고 확정된 구매 뒤 남은 한도를 반환합니다.
+        tx.executeWithoutResult(s -> products.lock(product).orElseThrow().perAccountLimit = 3);
+        UUID buyer = UUID.randomUUID();
+        var first = service.reserve(request(UUID.randomUUID(), buyer, 1, 1));
+        UUID attempt = UUID.randomUUID();
+        service.beginPayment(first.id(), attempt);
+        service.confirm(first.id(), attempt, start.plusSeconds(1));
+        assertThatThrownBy(() -> service.reserve(request(UUID.randomUUID(), buyer, 2, 0)))
+                .isInstanceOfSatisfying(StockException.class, ex -> {
+                    assertThat(ex.getErrorCode().code()).isEqualTo("PRODUCT_PURCHASE_LIMIT_EXCEEDED");
+                    assertThat(ex.purchaseLimit).isEqualTo(3);
+                    assertThat(ex.remainingPurchaseQuantity).isEqualTo(1);
+                });
+        var last = service.reserve(request(UUID.randomUUID(), buyer, 1, 0));
+        UUID lastAttempt = UUID.randomUUID();
+        service.beginPayment(last.id(), lastAttempt);
+        service.confirm(last.id(), lastAttempt, start.plusSeconds(2));
+        assertThatThrownBy(() -> service.reserve(request(UUID.randomUUID(), buyer, 1, 0)))
+                .isInstanceOfSatisfying(StockException.class, ex -> {
+                    assertThat(ex.getErrorCode().code()).isEqualTo("PRODUCT_PURCHASE_LIMIT_EXCEEDED");
+                    assertThat(ex.remainingPurchaseQuantity).isZero();
+                });
+        assertThat(available(optionA)).isEqualTo(3);
+    }
+
+    @Test
     void multipleOptionsRollbackWhenOneIsInsufficient() {
         assertThatThrownBy(
                         () -> service.reserve(request(UUID.randomUUID(), UUID.randomUUID(), 2, 2)))
-                .isInstanceOf(StockException.class);
+                .isInstanceOfSatisfying(StockException.class,
+                        ex -> assertThat(ex.getErrorCode().code()).isEqualTo("PRODUCT_STOCK"));
         assertThat(available(optionA)).isEqualTo(5);
         assertThat(available(optionB)).isEqualTo(1);
         assertThat(reservations.count()).isZero();
