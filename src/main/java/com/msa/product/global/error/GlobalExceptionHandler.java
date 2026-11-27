@@ -1,5 +1,7 @@
 package com.msa.product.global.error;
 
+import com.msa.product.domain.stock.exception.StockException;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -22,6 +24,20 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ErrorResponse> business(BusinessException exception) {
+        // 구매 한도 초과는 주문 서비스가 남은 수량을 안내할 수 있도록 한도와 남은 수량을 함께 반환합니다.
+        if (exception instanceof StockException stock && stock.purchaseLimit != null) {
+            var code = exception.getErrorCode();
+            return ResponseEntity.status(code.status())
+                    .header("Cache-Control", "no-store")
+                    .body(
+                            new ErrorResponse(
+                                    code.code(),
+                                    code.message(),
+                                    MDC.get("traceId"),
+                                    List.of(),
+                                    stock.purchaseLimit,
+                                    stock.remainingPurchaseQuantity));
+        }
         return response(exception.getErrorCode());
     }
 
